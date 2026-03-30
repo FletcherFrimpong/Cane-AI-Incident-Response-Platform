@@ -1,0 +1,98 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cane
+      POSTGRES_PASSWORD: cane_secret
+      POSTGRES_DB: cane_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cane -d cane_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      CANE_DATABASE_URL: postgresql+asyncpg://cane:cane_secret@postgres:5432/cane_db
+      CANE_REDIS_URL: redis://redis:6379/0
+      CANE_CELERY_BROKER_URL: redis://redis:6379/1
+      CANE_CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CANE_DEBUG: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      CANE_DATABASE_URL: postgresql+asyncpg://cane:cane_secret@postgres:5432/cane_db
+      CANE_REDIS_URL: redis://redis:6379/0
+      CANE_CELERY_BROKER_URL: redis://redis:6379/1
+      CANE_CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      CANE_DATABASE_URL: postgresql+asyncpg://cane:cane_secret@postgres:5432/cane_db
+      CANE_REDIS_URL: redis://redis:6379/0
+      CANE_CELERY_BROKER_URL: redis://redis:6379/1
+      CANE_CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  postgres_data:
+  redis_data:
