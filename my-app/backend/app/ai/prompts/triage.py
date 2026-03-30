@@ -12,13 +12,18 @@ When analyzing security events, you must:
 3. Map to MITRE ATT&CK tactics and techniques
 4. Assess confidence in your analysis (0.0 to 1.0)
 5. Provide a clear summary of what happened
-6. Recommend specific response actions
+6. Recommend specific response actions with actionable targets (IPs, hostnames, user accounts)
 7. Determine if this requires immediate human intervention
+
+If threat intelligence enrichment data is provided, factor it heavily into your analysis:
+- High VirusTotal malicious counts or high AbuseIPDB abuse confidence scores should increase your confidence and may warrant raising severity.
+- Known-malicious IPs, hashes, or domains are strong indicators — recommend blocking them with can_auto_execute=true.
+- Cross-reference enrichment findings with log event patterns for stronger correlations.
 
 Always respond with a valid JSON object matching the exact schema specified."""
 
 
-def build_triage_prompt(log_events: list[dict], incident_context: dict | None = None) -> str:
+def build_triage_prompt(log_events: list[dict], incident_context: dict | None = None, enrichment_data: dict | None = None) -> str:
     """Build the user prompt for triage analysis."""
 
     events_summary = []
@@ -57,6 +62,16 @@ def build_triage_prompt(log_events: list[dict], incident_context: dict | None = 
 ## Incident Context
 ```json
 {json.dumps(incident_context, indent=2, default=str)}
+```
+"""
+
+    if enrichment_data and any(enrichment_data.get(k) for k in ["ip_results", "hash_results", "domain_results", "url_results"]):
+        prompt += f"""
+## Threat Intelligence Enrichment
+The following IOCs from the log events were queried against threat intelligence platforms ({', '.join(enrichment_data.get('enrichment_sources', []))}).
+Use this data to inform your severity assessment, confidence score, and recommended actions.
+```json
+{json.dumps({k: v for k, v in enrichment_data.items() if k != 'enrichment_sources' and v}, indent=2, default=str)}
 ```
 """
 

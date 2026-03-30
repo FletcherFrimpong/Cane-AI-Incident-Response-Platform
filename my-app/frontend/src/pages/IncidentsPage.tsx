@@ -1,11 +1,19 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Plus, Search } from 'lucide-react'
+import { Search, Bell } from 'lucide-react'
 import { incidentsApi } from '../api/incidents'
-import { SEVERITY_COLORS, STATUS_COLORS } from '../utils/constants'
+import { SEVERITY_COLORS, STATUS_COLORS, SEVERITY_BORDER } from '../utils/constants'
 import { formatRelative } from '../utils/formatters'
 import type { Incident } from '../types/incident'
+
+const QUEUE_FILTERS = [
+  { label: 'Needs Attention', status: 'awaiting_analyst' },
+  { label: 'New', status: 'new' },
+  { label: 'In Progress', status: 'in_progress' },
+  { label: 'All Open', status: '' },
+  { label: 'Closed', status: 'closed' },
+]
 
 export default function IncidentsPage() {
   const [search, setSearch] = useState('')
@@ -19,26 +27,45 @@ export default function IncidentsPage() {
         .list({
           severity: severityFilter || undefined,
           status: statusFilter || undefined,
+          page_size: 100,
         })
         .then((r) => r.data),
   })
 
   const incidents: Incident[] = data?.items || []
+  const total = data?.total || 0
   const filtered = incidents.filter(
     (i) =>
       !search ||
       i.title.toLowerCase().includes(search.toLowerCase()) ||
-      i.id.includes(search),
+      i.id.includes(search) ||
+      i.attack_type?.toLowerCase().includes(search.toLowerCase()),
   )
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Incidents</h1>
-        <button className="btn-primary flex items-center gap-2">
-          <Plus className="h-4 w-4" />
-          New Incident
-        </button>
+        <div>
+          <h1 className="text-2xl font-bold">Incidents</h1>
+          <p className="text-sm text-gray-500 mt-1">{total} total incidents</p>
+        </div>
+      </div>
+
+      {/* Queue filters */}
+      <div className="flex gap-2 mb-4">
+        {QUEUE_FILTERS.map((f) => (
+          <button
+            key={f.label}
+            onClick={() => setStatusFilter(f.status)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              statusFilter === f.status
+                ? 'bg-brand-600 text-white'
+                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
       <div className="card mb-6">
@@ -47,7 +74,7 @@ export default function IncidentsPage() {
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search incidents..."
+              placeholder="Search by title, ID, or attack type..."
               className="input pl-9"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -64,18 +91,6 @@ export default function IncidentsPage() {
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
-          <select
-            className="input w-auto"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">All Statuses</option>
-            <option value="new">New</option>
-            <option value="triaging">Triaging</option>
-            <option value="in_progress">In Progress</option>
-            <option value="containment">Containment</option>
-            <option value="closed">Closed</option>
-          </select>
         </div>
       </div>
 
@@ -90,42 +105,57 @@ export default function IncidentsPage() {
           No incidents found.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filtered.map((incident) => (
             <Link
               key={incident.id}
               to={`/incidents/${incident.id}`}
-              className="card block hover:shadow-md transition-shadow"
+              className={`card block hover:shadow-md transition-shadow border-l-4 ${SEVERITY_BORDER[incident.severity] || 'border-l-gray-300'}`}
             >
               <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <span
-                      className={`badge ${SEVERITY_COLORS[incident.severity] || ''}`}
-                    >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className={`badge text-xs ${SEVERITY_COLORS[incident.severity] || ''}`}>
                       {incident.severity}
                     </span>
-                    <span
-                      className={`badge ${STATUS_COLORS[incident.status] || ''}`}
-                    >
-                      {incident.status.replace('_', ' ')}
+                    <span className={`badge text-xs ${STATUS_COLORS[incident.status] || ''}`}>
+                      {incident.status.replace(/_/g, ' ')}
                     </span>
-                    <h3 className="font-medium">{incident.title}</h3>
+                    {incident.status === 'awaiting_analyst' && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700">
+                        <Bell className="h-3 w-3" />
+                        Action Required
+                      </span>
+                    )}
+                    {incident.attack_type && (
+                      <span className="badge text-xs bg-purple-50 text-purple-700">
+                        {incident.attack_type}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-sm text-gray-500">
-                    {incident.id.slice(0, 8)} &middot;{' '}
-                    {formatRelative(incident.created_at)}
-                    {incident.attack_type && ` · ${incident.attack_type}`}
+                  <h3 className="font-medium truncate">{incident.title}</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {incident.id.slice(0, 8)} &middot; {formatRelative(incident.created_at)}
                   </p>
                 </div>
-                {incident.confidence_score !== null && (
-                  <div className="text-right">
-                    <div className="text-sm text-gray-500">Confidence</div>
-                    <div className="font-semibold">
-                      {Math.round(incident.confidence_score * 100)}%
+                <div className="flex items-center gap-4 ml-4 shrink-0">
+                  {incident.confidence_score != null && incident.confidence_score > 0 && (
+                    <div className="text-right">
+                      <div className="text-xs text-gray-500">Confidence</div>
+                      <div className="font-semibold text-sm">
+                        {Math.round(incident.confidence_score * 100)}%
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                  {incident.mitre_tactics && incident.mitre_tactics.length > 0 && (
+                    <div className="text-right hidden md:block">
+                      <div className="text-xs text-gray-500">MITRE</div>
+                      <div className="text-xs font-medium text-purple-700">
+                        {incident.mitre_tactics.length} tactic{incident.mitre_tactics.length > 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </Link>
           ))}

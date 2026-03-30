@@ -29,6 +29,25 @@ import uuid as uuid_mod
 
 logger = logging.getLogger("cane_ai.triage")
 
+# Maps AI-recommended action types to their expected parameter key names
+_ACTION_PARAM_KEYS = {
+    "block_ip": "ip_address",
+    "block_url": "url",
+    "block_file_hash": "file_hash",
+    "isolate_host": "machine_id",
+    "release_host": "machine_id",
+    "run_av_scan": "machine_id",
+    "disable_account": "user_principal_name",
+    "enable_account": "user_principal_name",
+    "revoke_sessions": "user_principal_name",
+    "force_password_reset": "user_principal_name",
+    "quarantine_email": "file_hash",
+}
+
+
+def _action_param_key(action_type: str) -> str:
+    return _ACTION_PARAM_KEYS.get(action_type, "target")
+
 
 def _safe_parse_json(text: str) -> dict:
     """Parse JSON from LLM response, handling markdown code blocks."""
@@ -279,11 +298,27 @@ async def auto_triage_incident(
         logger.error("Auto-triage failed to get provider: %s", e)
         return None
 
-    # Run triage
+    # --- Step 1: Auto-enrichment ---
+    enrichment_data = None
+    if settings.auto_enrichment_enabled:
+        from app.services.enrichment_service import extract_iocs, enrich_iocs
+        try:
+            iocs = extract_iocs(events_data)
+            if any(iocs.values()):
+                enrichment_data = await enrich_iocs(db, iocs, max_per_type=settings.auto_enrichment_max_iocs)
+                if enrichment_data.get("enrichment_sources"):
+                    logger.info("Auto-enrichment for incident %s: queried %s (%d IOCs)",
+                                incident_id, enrichment_data["enrichment_sources"],
+                                sum(len(iocs[k]) for k in iocs))
+        except Exception as e:
+            logger.warning("Auto-enrichment failed for incident %s: %s", incident_id, e)
+            enrichment_data = None
+
+    # --- Step 2: AI Triage ---
     logger.info("Auto-triaging incident %s (%s) with %d events",
                 incident_id, incident.title, len(events_data))
 
-    prompt = build_triage_prompt(events_data, incident_context)
+    prompt = build_triage_prompt(events_data, incident_context, enrichment_data=enrichment_data)
     llm_response = await provider.analyze_with_json(
         system_prompt=TRIAGE_SYSTEM_PROMPT,
         user_prompt=prompt,
@@ -356,10 +391,76 @@ async def auto_triage_incident(
             "severity": analysis_output.get("severity"),
             "attack_type": analysis_output.get("attack_type"),
             "automated": True,
+            "enrichment_sources": enrichment_data.get("enrichment_sources", []) if enrichment_data else [],
         },
         timestamp=datetime.now(timezone.utc),
     )
     db.add(timeline)
+
+    # --- Step 3: Auto-containment ---
+    recommended_actions = analysis_output.get("recommended_actions", [])
+    if recommended_actions:
+        from app.services.action_service import create_action
+        from app.models.action import ActionSource, ActionStatus, ActionLog
+
+        confidence = analysis_output.get("confidence_score", 0)
+        actions_created = 0
+        actions_auto_executed = 0
+
+        for rec in recommended_actions:
+            action_type = rec.get("action")
+            if not action_type:
+                continue
+
+            action_params = {}
+            target = rec.get("target")
+            if target:
+                param_key = _action_param_key(action_type)
+                action_params[param_key] = target
+
+            # Dedup: skip if identical action already exists for this incident
+            existing = await db.execute(
+                select(ActionLog).where(
+                    ActionLog.incident_id == incident.id,
+                    ActionLog.action_type == action_type,
+                    ActionLog.status.in_([
+                        ActionStatus.PENDING_APPROVAL,
+                        ActionStatus.APPROVED,
+                        ActionStatus.EXECUTING,
+                        ActionStatus.COMPLETED,
+                    ]),
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            can_auto = rec.get("can_auto_execute", False)
+            auto_execute = can_auto and confidence >= settings.auto_response_confidence_threshold
+
+            try:
+                await create_action(
+                    db=db,
+                    incident_id=incident.id,
+                    action_type=action_type,
+                    action_params=action_params if action_params else None,
+                    source=ActionSource.AI_RECOMMENDED,
+                    requested_by="system",
+                    auto_execute=auto_execute,
+                    confidence=confidence,
+                    auto_threshold=settings.auto_response_confidence_threshold,
+                )
+                actions_created += 1
+                if auto_execute:
+                    actions_auto_executed += 1
+            except Exception as e:
+                logger.error("Failed to create action %s for incident %s: %s",
+                            action_type, incident.id, e)
+
+        if actions_created > 0:
+            logger.info(
+                "Auto-containment for incident %s: %d actions created, %d auto-executed",
+                incident.id, actions_created, actions_auto_executed,
+            )
 
     await db.flush()
     logger.info(

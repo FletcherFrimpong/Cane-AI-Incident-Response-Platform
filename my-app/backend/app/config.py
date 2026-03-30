@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     auto_triage_api_key: str = ""
     auto_triage_model: str | None = None
 
+    # Auto-enrichment (query threat intel before AI triage)
+    auto_enrichment_enabled: bool = True
+    auto_enrichment_max_iocs: int = 4
+
     model_config = {"env_file": ".env", "env_prefix": "CANE_", "case_sensitive": False}
 
 

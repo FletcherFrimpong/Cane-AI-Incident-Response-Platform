@@ -4,7 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard,
   AlertTriangle,
-  Brain,
+  ListChecks,
   BookOpen,
   ScrollText,
   Settings,
@@ -15,7 +15,7 @@ import {
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Incidents', href: '/incidents', icon: AlertTriangle },
-  { name: 'AI Triage', href: '/triage', icon: Brain },
+  { name: 'Action Queue', href: '/actions', icon: ListChecks },
   { name: 'Playbooks', href: '/playbooks', icon: BookOpen },
   { name: 'Logs', href: '/logs', icon: ScrollText },
   { name: 'Settings', href: '/settings', icon: Settings },

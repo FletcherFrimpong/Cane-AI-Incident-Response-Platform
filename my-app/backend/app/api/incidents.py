@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -50,7 +50,25 @@ async def list_incidents(
         count_q = count_q.where(and_(*conditions))
     total = (await db.execute(count_q)).scalar() or 0
 
-    query = select(Incident).order_by(Incident.created_at.desc())
+    severity_rank = case(
+        (Incident.severity == "critical", 0),
+        (Incident.severity == "high", 1),
+        (Incident.severity == "medium", 2),
+        (Incident.severity == "low", 3),
+        else_=4,
+    )
+    status_rank = case(
+        (Incident.status == "awaiting_analyst", 0),
+        (Incident.status == "new", 1),
+        (Incident.status == "triaging", 2),
+        (Incident.status == "in_progress", 3),
+        (Incident.status == "containment", 4),
+        (Incident.status == "eradication", 5),
+        (Incident.status == "recovery", 6),
+        else_=7,
+    )
+
+    query = select(Incident).order_by(severity_rank, status_rank, Incident.created_at.desc())
     if conditions:
         query = query.where(and_(*conditions))
     query = query.offset((page - 1) * page_size).limit(page_size)

@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import TriagePage from './pages/TriagePage'
+import ActionsQueuePage from './pages/ActionsQueuePage'
 import PlaybooksPage from './pages/PlaybooksPage'
 import LogsPage from './pages/LogsPage'
 import SettingsPage from './pages/SettingsPage'
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="/incidents" element={<IncidentsPage />} />
                 <Route path="/incidents/:id" element={<IncidentDetailPage />} />
                 <Route path="/triage" element={<TriagePage />} />
+                <Route path="/actions" element={<ActionsQueuePage />} />
                 <Route path="/playbooks" element={<PlaybooksPage />} />
                 <Route path="/logs" element={<LogsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
