@@ -4,12 +4,14 @@ An AI-powered security incident response platform that ingests Microsoft securit
 
 ## Key Features
 
-- **Automated AI Triage** - Incidents are automatically triaged by AI as soon as they're created from correlated log events. No human trigger needed. Supports Claude, OpenAI, and Azure OpenAI via a system-level API key or per-user BYOK. The AI classifies severity, identifies attack types, maps to MITRE ATT&CK, extracts IOCs, and recommends response actions.
-- **Real-Time Log Ingestion** - Ingest security logs via real-time webhooks or batch file upload. Supports all 14 Azure Sentinel ASIM log types with automatic normalization.
-- **Event Correlation** - Automatically groups related events by correlation ID, detects attack patterns, and creates incidents with full kill-chain reconstruction.
-- **NIST 800-61 Playbooks** - 7 pre-built incident response playbooks (Ransomware, Phishing, Data Exfiltration, DDoS, Unauthorized Access, Malware, Insider Threat) with 59 guided steps. Create custom playbooks via the UI.
-- **Auto-Response with Approval Workflow** - Automated actions (block IP, disable account, quarantine email, isolate host) execute via real Microsoft APIs when AI confidence is high. Actions below threshold are routed to analysts for approval.
-- **Human-in-the-Loop** - Analysts receive AI-recommended actions with reasoning. They can approve, modify, or reject. Step-by-step playbook guidance walks them through remediation.
+- **Fully Automated TDIR Pipeline** - End-to-end automation from log ingestion to containment. Logs are ingested, normalized, correlated into incidents, enriched with threat intelligence, triaged by AI, and contained — all without human intervention. Analysts only engage when the AI flags incidents for review.
+- **Auto-Enrichment** - Before AI analysis, IOCs (IPs, file hashes, domains, URLs) are extracted from log events and queried against VirusTotal and AbuseIPDB. Threat intel scores are fed into the LLM prompt for more accurate triage decisions.
+- **AI-Powered Triage** - Supports Claude, OpenAI, and Azure OpenAI via system-level API key or per-user BYOK. The AI classifies severity, identifies attack types, maps to MITRE ATT&CK, extracts IOCs, assesses kill chain phase, and recommends response actions with auto-execute flags.
+- **Auto-Containment** - AI-recommended actions with confidence >= 95% auto-execute via integrations (block IP, isolate host, disable account). Below-threshold actions queue in the Action Queue for analyst approval with full context.
+- **Real-Time Log Ingestion** - Ingest security logs via webhooks or batch file upload. Supports all 14 Azure Sentinel ASIM log types with automatic normalization.
+- **Event Correlation** - Automatically groups related events by correlation ID, detects attack patterns (ransomware, phishing, exfiltration, etc.), and creates incidents.
+- **NIST 800-61 Playbooks** - 7 pre-built incident response playbooks (Ransomware, Phishing, Data Exfiltration, DDoS, Unauthorized Access, Malware, Insider Threat) with 59 guided steps.
+- **SOC Analyst Queue** - Incidents sorted by severity and status priority. Critical/awaiting-analyst incidents surface first. Incident Detail page serves as the full response hub: AI analysis, MITRE mapping, IOCs, action approval, timeline with analyst notes.
 - **Real Platform Integrations** - Microsoft Graph, Sentinel, Defender for Endpoint, VirusTotal, AbuseIPDB. All with OAuth2/API key auth, encrypted credential storage, connection testing, and health monitoring.
 - **Role-Based Access** - Four roles (Tier 1 Analyst, Tier 2 Analyst, Manager, Admin) with granular permissions.
 
@@ -61,20 +63,19 @@ An AI-powered security incident response platform that ingests Microsoft securit
                                  +-----------+
 ```
 
-### Data Flow
+### Automated TDIR Pipeline
+
+The platform implements a fully automated Threat Detection, Investigation, and Response (TDIR) pipeline following NIST 800-61 and industry best practices. Every step runs without human intervention — analysts only get involved when the AI flags an incident for review.
 
 ```
-1. LOG INGESTION
-   Sentinel Webhook / File Upload
-           |
-           v
-   API /logs/ingest or /logs/upload
+1. DETECTION & INGESTION
+   Sentinel Webhook / File Upload / Batch API
            |
            v
    Log Normalizer (14 ASIM schema types)
            |
            v
-   Correlation Engine (group by CorrelationId)
+   Correlation Engine (group by CorrelationId + time window)
            |
            +---> Existing incident? Link event to it
            +---> New correlation group? Create incident
@@ -82,59 +83,78 @@ An AI-powered security incident response platform that ingests Microsoft securit
            v
    Store in PostgreSQL (log_events table, JSONB raw data)
 
-2. AUTOMATED AI TRIAGE
-   Incident created by correlation engine
+2. AUTO-ENRICHMENT (Celery background task)
+   Incident created
            |
            v
-   Celery task auto-queued (no human trigger needed)
+   Extract IOCs from log events:
+   - Public IPs (filter out RFC-1918 private ranges)
+   - File hashes (SHA256/SHA1/MD5 from raw data)
+   - Domains and URLs
+           |
+           v
+   Query Threat Intelligence (if configured):
+   - VirusTotal: IP/hash/domain/URL reputation, malicious counts
+   - AbuseIPDB: IP abuse confidence score, report count
+           |
+           v
+   Enrichment results fed into AI prompt
+   (Graceful skip if integrations not configured)
+
+3. AI TRIAGE
+   Enriched events + incident context
            |
            v
    System LLM API key (CANE_AUTO_TRIAGE_API_KEY)
            |
            v
-   Claude / OpenAI / Azure OpenAI
+   Claude / OpenAI / Azure OpenAI (temperature: 0.1)
            |
            v
    Structured JSON response:
-   - Severity classification
+   - Severity classification (critical/high/medium/low/info)
    - Attack type identification
-   - MITRE ATT&CK mapping (tactics + techniques)
-   - Confidence score (0.0 - 1.0)
+   - MITRE ATT&CK mapping (tactics + technique IDs)
    - Kill chain phase
-   - Indicators of compromise (IPs, domains, hashes, emails)
-   - Recommended actions with priority
+   - Confidence score (0.0 - 1.0)
+   - IOCs extracted (IPs, domains, hashes, emails)
+   - Recommended actions with priority and auto-execute flag
    - Playbook suggestion
+   - Human review determination
            |
            v
-   Update incident + Create AI analysis record + Match playbook
-           |
-           v
-   Status -> AWAITING_ANALYST (if human review needed)
-          -> TRIAGING (if AI can handle autonomously)
+   Update incident + Store AI analysis + Match playbook
 
-   Manual triage also available via UI (Settings -> API Keys for per-user BYOK)
+4. AUTO-CONTAINMENT
+   For each AI-recommended action:
+           |
+           v
+   Confidence >= 0.95 AND can_auto_execute?
+           |
+          YES --> Execute immediately via integration:
+           |      - Block IP (Microsoft Defender)
+           |      - Isolate host (Microsoft Defender)
+           |      - Disable account (Microsoft Graph)
+           |      - Revoke sessions (Microsoft Graph)
+           |      - Block URL/hash (Microsoft Defender)
+           |
+          NO --> Create pending action for analyst approval
+           |
+           v
+   All actions logged in audit trail with full context
 
-3. AUTO-RESPONSE / HUMAN-IN-THE-LOOP
-   AI recommends action (e.g., block_ip, confidence: 0.87)
+5. ANALYST REVIEW (only when needed)
+   Incident Detail page shows:
+   - AI analysis summary with confidence
+   - MITRE ATT&CK mapping
+   - Extracted IOCs with threat intel scores
+   - Pending actions with Approve / Reject buttons
            |
            v
-   Confidence >= 0.95? --YES--> Auto-execute via integration
-           |
-           NO
-           |
-           v
-   Create pending action -> WebSocket notification to analysts
-           |
-           v
-   Analyst reviews in Triage Queue:
-   - Sees AI reasoning and evidence
-   - Approves / Modifies / Rejects
-           |
-           v
-   On Approve: Execute via Microsoft Defender / Graph API
-   On Reject: Log reason, continue playbook
+   On Approve: Execute via integration APIs
+   On Reject: Log reason, continue to next action
 
-4. PLAYBOOK EXECUTION
+6. PLAYBOOK EXECUTION
    Playbook attached to incident (AI-recommended or manual)
            |
            v
@@ -187,7 +207,8 @@ my-app/
 │   │   │   ├── log_normalizer.py   # 14 ASIM log type normalizers
 │   │   │   ├── correlation.py      # Event correlation engine
 │   │   │   ├── log_ingestion.py    # Ingestion orchestration
-│   │   │   ├── triage_service.py   # AI triage orchestration
+│   │   │   ├── enrichment_service.py  # IOC extraction + threat intel queries
+│   │   │   ├── triage_service.py   # AI triage + auto-containment orchestration
 │   │   │   ├── playbook_service.py # Playbook execution engine
 │   │   │   ├── action_service.py   # Auto-response + approval workflow
 │   │   │   ├── integration_service.py # Credential encryption + health
@@ -218,7 +239,7 @@ my-app/
 │   │   ├── App.tsx             # Routes + auth guard
 │   │   ├── api/                # Axios API client layer
 │   │   ├── store/              # Zustand state management
-│   │   ├── pages/              # Dashboard, Incidents, Triage, Playbooks, Logs, Settings
+│   │   ├── pages/              # Dashboard, Incidents, Action Queue, Playbooks, Logs, Settings
 │   │   ├── components/         # Layout (AppShell, Sidebar)
 │   │   ├── types/              # TypeScript interfaces
 │   │   └── utils/              # Constants, formatters
@@ -359,11 +380,19 @@ CANE_AUTO_TRIAGE_PROVIDER=claude          # claude, openai, or azure_openai
 CANE_AUTO_TRIAGE_API_KEY=sk-ant-...       # System-level LLM API key
 CANE_AUTO_TRIAGE_MODEL=                   # Optional model override
 
-# Auto-response threshold
-CANE_AUTO_RESPONSE_CONFIDENCE_THRESHOLD=0.95
+# Auto-enrichment (query threat intel before AI triage)
+CANE_AUTO_ENRICHMENT_ENABLED=true
+CANE_AUTO_ENRICHMENT_MAX_IOCS=4          # Max IOCs per type to query (rate limit control)
+
+# Auto-containment threshold
+CANE_AUTO_RESPONSE_CONFIDENCE_THRESHOLD=0.95  # Actions above this auto-execute
 ```
 
-When `CANE_AUTO_TRIAGE_API_KEY` is set, every new incident created from log correlation is automatically sent to the AI for triage via a Celery background task. No manual intervention required.
+When `CANE_AUTO_TRIAGE_API_KEY` is set, the full TDIR pipeline runs automatically:
+1. Incident created from correlated logs
+2. IOCs extracted and queried against VirusTotal/AbuseIPDB (if configured in Settings > Integrations)
+3. AI triages the incident with enriched data
+4. High-confidence actions auto-execute via integrations; others queue for analyst approval
 
 ## API Overview
 
