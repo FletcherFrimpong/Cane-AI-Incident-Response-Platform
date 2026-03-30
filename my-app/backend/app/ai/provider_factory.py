@@ -1,5 +1,6 @@
 """Factory for creating LLM provider instances based on user configuration."""
 
+import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,31 @@ from app.ai.provider_base import LLMProvider as LLMProviderProtocol
 from app.exceptions import NotFoundError, ValidationError
 
 import uuid
+
+logger = logging.getLogger("cane_ai.provider_factory")
+
+
+def get_system_provider() -> LLMProviderProtocol:
+    """Get an LLM provider using system-level config (for automated triage, no user context)."""
+    from app.config import get_settings
+    settings = get_settings()
+
+    if not settings.auto_triage_api_key:
+        raise NotFoundError(
+            "No system API key configured. Set CANE_AUTO_TRIAGE_API_KEY environment variable."
+        )
+
+    provider_name = settings.auto_triage_provider
+    api_key = settings.auto_triage_api_key
+
+    if provider_name == "claude":
+        return ClaudeProvider(api_key=api_key)
+    elif provider_name == "openai":
+        return OpenAIProvider(api_key=api_key)
+    elif provider_name == "azure_openai":
+        return AzureOpenAIProvider(api_key=api_key, endpoint="")
+    else:
+        raise ValidationError(f"Unsupported auto-triage provider: {provider_name}")
 
 
 async def get_provider_for_user(

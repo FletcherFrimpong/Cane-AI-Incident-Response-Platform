@@ -74,6 +74,27 @@ class VirusTotalClient(BaseIntegrationClient):
             "reputation": data.get("reputation", 0),
         }
 
+    async def lookup_url(self, url: str) -> dict:
+        """Lookup a URL on VirusTotal."""
+        import base64
+        # VT requires base64-encoded URL without padding
+        url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+        headers = await self._auth_headers()
+        client = await self.get_http_client()
+        response = await client.get(f"{self.BASE_URL}/urls/{url_id}", headers=headers)
+        if response.status_code == 404:
+            return {"found": False, "url": url}
+        response.raise_for_status()
+        data = response.json().get("data", {}).get("attributes", {})
+        stats = data.get("last_analysis_stats", {})
+        return {
+            "found": True,
+            "url": url,
+            "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
+            "reputation": data.get("reputation", 0),
+        }
+
     async def lookup_domain(self, domain: str) -> dict:
         """Lookup a domain on VirusTotal."""
         headers = await self._auth_headers()

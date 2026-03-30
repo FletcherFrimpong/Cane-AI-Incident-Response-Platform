@@ -3,13 +3,17 @@ import { dashboardApi } from '../api/dashboard'
 import { AlertTriangle, Shield, Clock, CheckCircle } from 'lucide-react'
 
 export default function DashboardPage() {
-  const { data: overview, isLoading } = useQuery({
+  const { data: overview, isLoading, isError } = useQuery({
     queryKey: ['dashboard-overview'],
     queryFn: () => dashboardApi.overview().then((r) => r.data),
   })
 
   if (isLoading) {
     return <div className="text-gray-500">Loading dashboard...</div>
+  }
+
+  if (isError) {
+    return <div className="card text-center py-12 text-red-600">Failed to load dashboard. Please try again.</div>
   }
 
   const stats = [
@@ -21,19 +25,21 @@ export default function DashboardPage() {
     },
     {
       name: 'Critical Alerts',
-      value: overview?.critical_count ?? 0,
+      value: overview?.critical_incidents ?? 0,
       icon: Shield,
       color: 'text-orange-600 bg-orange-100',
     },
     {
       name: 'Avg Response Time',
-      value: overview?.avg_response_time ?? 'N/A',
+      value: overview?.mean_time_to_respond_minutes != null
+        ? `${overview.mean_time_to_respond_minutes}m`
+        : 'N/A',
       icon: Clock,
       color: 'text-blue-600 bg-blue-100',
     },
     {
-      name: 'Resolved Today',
-      value: overview?.resolved_today ?? 0,
+      name: 'Incidents Today',
+      value: overview?.incidents_today ?? 0,
       icon: CheckCircle,
       color: 'text-green-600 bg-green-100',
     },

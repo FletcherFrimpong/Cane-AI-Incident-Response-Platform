@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from ipaddress import IPv4Address, IPv6Address
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
 class LogEventIngest(BaseModel):
@@ -23,14 +24,20 @@ class LogEventResponse(BaseModel):
     correlation_id: str | None
     severity: str
     summary: str | None
-    source_ip: str | None
-    destination_ip: str | None
+    source_ip: str | IPv4Address | IPv6Address | None
+    destination_ip: str | IPv4Address | IPv6Address | None
     user_identity: str | None
     host: str | None
     incident_id: uuid.UUID | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("source_ip", "destination_ip")
+    def serialize_ip(self, v: Any) -> str | None:
+        if v is None:
+            return None
+        return str(v)
 
 
 class LogEventDetailResponse(LogEventResponse):

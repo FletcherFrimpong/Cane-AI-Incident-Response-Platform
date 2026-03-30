@@ -126,6 +126,22 @@ class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
         response.raise_for_status()
         return response.json()
 
+    async def update_security_alert(self, alert_id: str, updates: dict) -> dict:
+        """Update a security alert in Microsoft Graph."""
+        self._log_action("update_security_alert", {"alert_id": alert_id, "updates": updates})
+        if self.dry_run:
+            return {"success": True, "message": f"[DRY RUN] Would update alert {alert_id}"}
+
+        headers = await self._auth_headers()
+        client = await self.get_http_client()
+        response = await client.patch(
+            f"{self.BASE_URL}/security/alerts_v2/{alert_id}",
+            headers=headers,
+            json=updates,
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+
     async def read_risky_users(self) -> dict:
         """Read risky users from Identity Protection."""
         headers = await self._auth_headers()

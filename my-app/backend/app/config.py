@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Auto-response
     auto_response_confidence_threshold: float = 0.95
 
+    # Auto-triage (system-level LLM key for automated analysis)
+    auto_triage_enabled: bool = True
+    auto_triage_provider: str = "claude"
+    auto_triage_api_key: str = ""
+    auto_triage_model: str | None = None
+
     model_config = {"env_file": ".env", "env_prefix": "CANE_", "case_sensitive": False}
 
 

@@ -6,8 +6,11 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
 from app.models.log_event import LogEvent
 from app.models.incident import Incident, IncidentSeverity, IncidentStatus, IncidentTimeline
+
+logger = logging.getLogger("cane_ai.correlation")
 
 
 SEVERITY_PRIORITY = {
@@ -84,7 +87,10 @@ async def find_or_create_incident_for_correlation(
     # Create a new incident from correlated events
     severity_str = _highest_severity(normalized_events)
     attack_type = _detect_attack_type(normalized_events)
-    severity = IncidentSeverity(severity_str) if severity_str in IncidentSeverity.__members__.values() else IncidentSeverity.MEDIUM
+    try:
+        severity = IncidentSeverity(severity_str)
+    except ValueError:
+        severity = IncidentSeverity.MEDIUM
 
     # Build title from the most informative event
     title = f"Correlated Incident: {correlation_id}"
@@ -130,6 +136,17 @@ async def find_or_create_incident_for_correlation(
     )
     db.add(timeline)
     await db.flush()
+
+    # Fire auto-triage in background
+    try:
+        from app.config import get_settings
+        settings = get_settings()
+        if settings.auto_triage_enabled and settings.auto_triage_api_key:
+            from app.workers.triage_tasks import auto_triage_incident_task
+            auto_triage_incident_task.delay(str(incident.id))
+            logger.info("Auto-triage task queued for incident %s", incident.id)
+    except Exception as e:
+        logger.warning("Failed to queue auto-triage for incident %s: %s", incident.id, e)
 
     return incident
 

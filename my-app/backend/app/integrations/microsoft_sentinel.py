@@ -134,6 +134,17 @@ class MicrosoftSentinelClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         response.raise_for_status()
         return {"success": True, "data": response.json()}
 
+    async def list_alert_rules(self, top: int = 50) -> dict:
+        """List configured alert rules in Sentinel."""
+        headers = await self._auth_headers()
+        client = await self.get_http_client()
+        response = await client.get(
+            f"{self._sentinel_base_url}/alertRules?api-version=2023-11-01",
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def create_watchlist(self, name: str, items: list[dict]) -> dict:
         """Create a watchlist in Sentinel."""
         self._log_action("create_watchlist", {"name": name, "item_count": len(items)})

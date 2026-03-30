@@ -4,7 +4,7 @@ An AI-powered security incident response platform that ingests Microsoft securit
 
 ## Key Features
 
-- **AI-Powered Triage** - BYOK (Bring Your Own Key) model supporting Claude, OpenAI, and Azure OpenAI. The AI classifies severity, identifies attack types, maps to MITRE ATT&CK, and recommends response actions.
+- **Automated AI Triage** - Incidents are automatically triaged by AI as soon as they're created from correlated log events. No human trigger needed. Supports Claude, OpenAI, and Azure OpenAI via a system-level API key or per-user BYOK. The AI classifies severity, identifies attack types, maps to MITRE ATT&CK, extracts IOCs, and recommends response actions.
 - **Real-Time Log Ingestion** - Ingest security logs via real-time webhooks or batch file upload. Supports all 14 Azure Sentinel ASIM log types with automatic normalization.
 - **Event Correlation** - Automatically groups related events by correlation ID, detects attack patterns, and creates incidents with full kill-chain reconstruction.
 - **NIST 800-61 Playbooks** - 7 pre-built incident response playbooks (Ransomware, Phishing, Data Exfiltration, DDoS, Unauthorized Access, Malware, Insider Threat) with 59 guided steps. Create custom playbooks via the UI.
@@ -82,11 +82,14 @@ An AI-powered security incident response platform that ingests Microsoft securit
            v
    Store in PostgreSQL (log_events table, JSONB raw data)
 
-2. AI TRIAGE
-   Incident created
+2. AUTOMATED AI TRIAGE
+   Incident created by correlation engine
            |
            v
-   Triage Service -> Provider Factory -> User's LLM API Key (decrypted)
+   Celery task auto-queued (no human trigger needed)
+           |
+           v
+   System LLM API key (CANE_AUTO_TRIAGE_API_KEY)
            |
            v
    Claude / OpenAI / Azure OpenAI
@@ -95,13 +98,21 @@ An AI-powered security incident response platform that ingests Microsoft securit
    Structured JSON response:
    - Severity classification
    - Attack type identification
-   - MITRE ATT&CK mapping
+   - MITRE ATT&CK mapping (tactics + techniques)
    - Confidence score (0.0 - 1.0)
-   - Recommended actions
+   - Kill chain phase
+   - Indicators of compromise (IPs, domains, hashes, emails)
+   - Recommended actions with priority
    - Playbook suggestion
            |
            v
-   Update incident + Create AI analysis record
+   Update incident + Create AI analysis record + Match playbook
+           |
+           v
+   Status -> AWAITING_ANALYST (if human review needed)
+          -> TRIAGING (if AI can handle autonomously)
+
+   Manual triage also available via UI (Settings -> API Keys for per-user BYOK)
 
 3. AUTO-RESPONSE / HUMAN-IN-THE-LOOP
    AI recommends action (e.g., block_ip, confidence: 0.87)
@@ -187,8 +198,8 @@ my-app/
 │   │   │   ├── claude_provider.py  # Anthropic Claude
 │   │   │   ├── openai_provider.py  # OpenAI
 │   │   │   ├── azure_openai_provider.py # Azure OpenAI
-│   │   │   ├── provider_factory.py # Factory (resolves user's API key)
-│   │   │   └── prompts/           # Jinja2 prompt templates
+│   │   │   ├── provider_factory.py # Factory (resolves user or system API key)
+│   │   │   └── prompts/           # Structured prompt templates
 │   │   ├── integrations/       # Platform connectors
 │   │   │   ├── base_client.py      # ABC + OAuth2 mixin
 │   │   │   ├── microsoft_graph.py  # Disable user, revoke sessions, etc.
@@ -199,7 +210,8 @@ my-app/
 │   │   ├── data/
 │   │   │   └── seed_playbooks.py   # 7 NIST 800-61 playbooks (59 steps)
 │   │   └── workers/
-│   │       └── celery_app.py       # Celery config + beat schedule
+│   │       ├── celery_app.py       # Celery config + beat schedule
+│   │       └── triage_tasks.py     # Auto-triage background tasks
 │   └── alembic/                # Database migrations
 ├── frontend/
 │   ├── src/
@@ -211,8 +223,7 @@ my-app/
 │   │   ├── types/              # TypeScript interfaces
 │   │   └── utils/              # Constants, formatters
 │   └── package.json
-├── synthetic_logs/             # 14 ASIM log files (30MB)
-└── enhanced_synthetic_logs/    # 4 attack scenario files
+└── synthetic_logs/             # 14 ASIM log files + 4 attack scenario files
 ```
 
 ## Pre-Built Playbooks
@@ -272,7 +283,31 @@ All credentials are AES-256-GCM encrypted at rest. Each integration supports dry
 
 ```bash
 cd my-app
-docker-compose up
+docker-compose up --build
+```
+
+On first run, create the database tables:
+
+```bash
+docker-compose exec backend python -c "
+import asyncio
+from app.database import engine
+from app.models.base import Base
+import app.models
+async def init():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print('Tables created')
+asyncio.run(init())
+"
+```
+
+Register your first user:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@example.com", "password": "changeme", "full_name": "Admin", "role": "admin"}'
 ```
 
 Services will be available at:
@@ -312,11 +347,23 @@ npm run dev
 Copy `.env.example` to `.env` and configure:
 
 ```env
+# Required
 CANE_DATABASE_URL=postgresql+asyncpg://cane:cane_secret@localhost:5432/cane_db
 CANE_REDIS_URL=redis://localhost:6379/0
 CANE_JWT_SECRET_KEY=your-secret-key-here
 CANE_ENCRYPTION_MASTER_KEY=your-encryption-key-here
+
+# Automated AI Triage (set API key to enable)
+CANE_AUTO_TRIAGE_ENABLED=true
+CANE_AUTO_TRIAGE_PROVIDER=claude          # claude, openai, or azure_openai
+CANE_AUTO_TRIAGE_API_KEY=sk-ant-...       # System-level LLM API key
+CANE_AUTO_TRIAGE_MODEL=                   # Optional model override
+
+# Auto-response threshold
+CANE_AUTO_RESPONSE_CONFIDENCE_THRESHOLD=0.95
 ```
+
+When `CANE_AUTO_TRIAGE_API_KEY` is set, every new incident created from log correlation is automatically sent to the AI for triage via a Celery background task. No manual intervention required.
 
 ## API Overview
 

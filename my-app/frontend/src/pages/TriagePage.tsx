@@ -9,11 +9,12 @@ export default function TriagePage() {
   const [selectedIncident, setSelectedIncident] = useState('')
   const [provider, setProvider] = useState('claude')
 
-  const { data: incidents } = useQuery({
+  const { data: incidentsData } = useQuery({
     queryKey: ['incidents-for-triage'],
     queryFn: () =>
-      incidentsApi.list({ status: 'new' }).then((r) => r.data as Incident[]),
+      incidentsApi.list({ status: 'new' }).then((r) => r.data),
   })
+  const incidents: Incident[] = incidentsData?.items || []
 
   const analyzeMutation = useMutation({
     mutationFn: () => triageApi.analyze(selectedIncident, provider),
@@ -37,7 +38,7 @@ export default function TriagePage() {
                 onChange={(e) => setSelectedIncident(e.target.value)}
               >
                 <option value="">Choose an incident...</option>
-                {incidents?.map((i) => (
+                {incidents.map((i) => (
                   <option key={i.id} value={i.id}>
                     {i.title} ({i.severity})
                   </option>
@@ -55,7 +56,7 @@ export default function TriagePage() {
               >
                 <option value="claude">Claude (Anthropic)</option>
                 <option value="openai">OpenAI GPT-4</option>
-                <option value="gemini">Google Gemini</option>
+                <option value="azure_openai">Azure OpenAI</option>
               </select>
             </div>
             <button

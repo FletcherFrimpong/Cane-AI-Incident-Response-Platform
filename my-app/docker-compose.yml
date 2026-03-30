@@ -39,6 +39,10 @@ services:
       CANE_CELERY_BROKER_URL: redis://redis:6379/1
       CANE_CELERY_RESULT_BACKEND: redis://redis:6379/2
       CANE_DEBUG: "true"
+      CANE_AUTO_TRIAGE_ENABLED: "${CANE_AUTO_TRIAGE_ENABLED:-true}"
+      CANE_AUTO_TRIAGE_PROVIDER: "${CANE_AUTO_TRIAGE_PROVIDER:-claude}"
+      CANE_AUTO_TRIAGE_API_KEY: "${CANE_AUTO_TRIAGE_API_KEY:-}"
+      CANE_AUTO_TRIAGE_MODEL: "${CANE_AUTO_TRIAGE_MODEL:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,6 +50,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - /app/.venv
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   celery_worker:
@@ -57,6 +62,10 @@ services:
       CANE_REDIS_URL: redis://redis:6379/0
       CANE_CELERY_BROKER_URL: redis://redis:6379/1
       CANE_CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CANE_AUTO_TRIAGE_ENABLED: "${CANE_AUTO_TRIAGE_ENABLED:-true}"
+      CANE_AUTO_TRIAGE_PROVIDER: "${CANE_AUTO_TRIAGE_PROVIDER:-claude}"
+      CANE_AUTO_TRIAGE_API_KEY: "${CANE_AUTO_TRIAGE_API_KEY:-}"
+      CANE_AUTO_TRIAGE_MODEL: "${CANE_AUTO_TRIAGE_MODEL:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,7 +73,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+      - /app/.venv
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 -Q celery,triage
 
   celery_beat:
     build:
@@ -80,6 +90,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - /app/.venv
     command: celery -A app.workers.celery_app beat --loglevel=info
 
   frontend:
@@ -88,6 +99,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5173:5173"
+    depends_on:
+      - backend
     volumes:
       - ./frontend:/app
       - /app/node_modules

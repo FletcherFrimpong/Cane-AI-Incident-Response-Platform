@@ -12,7 +12,7 @@ export default function IncidentsPage() {
   const [severityFilter, setSeverityFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['incidents', severityFilter, statusFilter],
     queryFn: () =>
       incidentsApi
@@ -23,7 +23,7 @@ export default function IncidentsPage() {
         .then((r) => r.data),
   })
 
-  const incidents: Incident[] = data || []
+  const incidents: Incident[] = data?.items || []
   const filtered = incidents.filter(
     (i) =>
       !search ||
@@ -81,6 +81,10 @@ export default function IncidentsPage() {
 
       {isLoading ? (
         <div className="text-gray-500">Loading incidents...</div>
+      ) : isError ? (
+        <div className="card text-center py-12 text-red-600">
+          Failed to load incidents. Please try again.
+        </div>
       ) : filtered.length === 0 ? (
         <div className="card text-center py-12 text-gray-500">
           No incidents found.

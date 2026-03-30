@@ -10,7 +10,7 @@ export default function LogsPage() {
   const [search, setSearch] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['logs', sourceFilter],
     queryFn: () =>
       logsApi
@@ -21,7 +21,7 @@ export default function LogsPage() {
         .then((r) => r.data),
   })
 
-  const logs: LogEvent[] = data || []
+  const logs: LogEvent[] = data?.items || []
   const filtered = logs.filter(
     (l) =>
       !search ||
@@ -68,6 +68,10 @@ export default function LogsPage() {
 
       {isLoading ? (
         <div className="text-gray-500">Loading logs...</div>
+      ) : isError ? (
+        <div className="card text-center py-12 text-red-600">
+          Failed to load logs. Please try again.
+        </div>
       ) : filtered.length === 0 ? (
         <div className="card text-center py-12 text-gray-500">
           No log events found.

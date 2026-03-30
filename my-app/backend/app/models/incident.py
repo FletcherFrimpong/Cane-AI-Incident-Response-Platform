@@ -50,8 +50,8 @@ class Incident(Base, UUIDMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("playbooks.id", ondelete="SET NULL"), nullable=True
     )
     current_playbook_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    mitre_tactics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    mitre_techniques: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    mitre_tactics: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    mitre_techniques: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     source_entities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

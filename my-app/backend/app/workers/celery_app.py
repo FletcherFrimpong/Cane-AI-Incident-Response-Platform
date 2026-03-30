@@ -24,6 +24,12 @@ celery_app.conf.update(
             "schedule": 300.0,  # every 5 minutes
         },
     },
+    task_routes={
+        "app.workers.triage_tasks.*": {"queue": "triage"},
+    },
 )
 
 celery_app.autodiscover_tasks(["app.workers"])
+
+# Explicit imports for task registration
+import app.workers.triage_tasks  # noqa: F401
