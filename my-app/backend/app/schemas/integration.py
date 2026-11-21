@@ -11,7 +11,9 @@ class IntegrationCreate(BaseModel):
     auth_type: AuthType
     credentials: dict[str, Any]
     config: dict[str, Any] | None = None
-    dry_run: bool = False
+    # Safe by default: a new integration only simulates actions until someone
+    # deliberately switches it to live.
+    dry_run: bool = True
     tenant_id: str = "default"
 
 
@@ -34,6 +36,7 @@ class IntegrationResponse(BaseModel):
     dry_run: bool
     health_status: HealthStatus
     last_health_check: datetime | None
+    state: dict | None = None
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
@@ -47,8 +50,13 @@ class PlatformInfo(BaseModel):
     description: str
     auth_type: AuthType
     required_credentials: list[str]
+    optional_credentials: list[str] = []
     optional_config: list[str]
     capabilities: list[str]
+    category: str = "response"
+    actions: list[str] = []
+    enriches: list[str] = []
+    provides_context: list[str] = []
 
 
 class ConnectionTestResult(BaseModel):

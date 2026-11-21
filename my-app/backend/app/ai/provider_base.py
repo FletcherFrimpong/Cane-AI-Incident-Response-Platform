@@ -4,6 +4,11 @@ from typing import Protocol, AsyncIterator, runtime_checkable
 from dataclasses import dataclass
 
 
+class LLMRefusalError(Exception):
+    """The model declined to answer (a safety refusal). Not retryable as-is:
+    the incident should go to an analyst instead."""
+
+
 @dataclass
 class LLMResponse:
     content: str

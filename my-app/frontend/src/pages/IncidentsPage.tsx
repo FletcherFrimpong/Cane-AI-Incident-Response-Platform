@@ -1,166 +1,110 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { Search, Bell } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { Filter, Inbox, RefreshCw, Plus, X } from 'lucide-react'
 import { incidentsApi } from '../api/incidents'
-import { SEVERITY_COLORS, STATUS_COLORS, SEVERITY_BORDER } from '../utils/constants'
-import { formatRelative } from '../utils/formatters'
-import type { Incident } from '../types/incident'
+import IncidentTable from '../components/IncidentTable'
+import NewIncidentModal from '../components/NewIncidentModal'
+import { EmptyState, ErrorNote, Loading, Pager, ViewsSidebar, type ViewItem } from '../components/ui'
+import { useAssignableUsers } from '../hooks'
+import { SEVERITIES, SEVERITY_META } from '../utils/constants'
 
-const QUEUE_FILTERS = [
-  { label: 'Needs Attention', status: 'awaiting_analyst' },
-  { label: 'New', status: 'new' },
-  { label: 'In Progress', status: 'in_progress' },
-  { label: 'All Open', status: '' },
-  { label: 'Closed', status: 'closed' },
-]
+const PAGE_SIZE = 50
 
 export default function IncidentsPage() {
-  const [search, setSearch] = useState('')
-  const [severityFilter, setSeverityFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') || 'attention'
+  const search = params.get('search') || ''
+  const severity = params.get('severity') || ''
+  const page = Number(params.get('page') || 1)
+  const [showFilters, setShowFilters] = useState(!!(search || severity))
+  const [searchDraft, setSearchDraft] = useState(search)
+  const [creating, setCreating] = useState(false)
+  const { names } = useAssignableUsers()
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['incidents', severityFilter, statusFilter],
-    queryFn: () =>
-      incidentsApi
-        .list({
-          severity: severityFilter || undefined,
-          status: statusFilter || undefined,
-          page_size: 100,
-        })
-        .then((r) => r.data),
+  useEffect(() => { setSearchDraft(search); if (search) setShowFilters(true) }, [search])
+
+  const update = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(params)
+    Object.entries(changes).forEach(([k, v]) => (v ? next.set(k, v) : next.delete(k)))
+    if (!('page' in changes)) next.delete('page')
+    setParams(next)
+  }
+
+  const views = useQuery({ queryKey: ['incident-views'], queryFn: () => incidentsApi.views().then((r) => r.data as ViewItem[]), refetchInterval: 60_000 })
+  const list = useQuery({
+    queryKey: ['incidents', view, page, search, severity],
+    queryFn: () => incidentsApi.list({ view, page, page_size: PAGE_SIZE, search: search || undefined, severity: severity || undefined }).then((r) => r.data),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
   })
 
-  const incidents: Incident[] = data?.items || []
-  const total = data?.total || 0
-  const filtered = incidents.filter(
-    (i) =>
-      !search ||
-      i.title.toLowerCase().includes(search.toLowerCase()) ||
-      i.id.includes(search) ||
-      i.attack_type?.toLowerCase().includes(search.toLowerCase()),
-  )
+  const all = views.data || []
+  const label = all.find((v) => v.key === view)?.label || 'Incidents'
+  const main = all.filter((v) => !['closed', 'false_positive', 'low'].includes(v.key))
+  const rest = all.filter((v) => ['low', 'closed', 'false_positive'].includes(v.key)).map((v) => ({ ...v, muted: true }))
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">Incidents</h1>
-          <p className="text-sm text-gray-500 mt-1">{total} total incidents</p>
-        </div>
-      </div>
+    <div className="flex-1 flex min-w-0">
+      <ViewsSidebar
+        title="Views"
+        active={view}
+        onSelect={(key) => setParams({ view: key })}
+        sections={[{ items: main }, { items: rest }]}
+        footer={<>Views update live.</>}
+      />
 
-      {/* Queue filters */}
-      <div className="flex gap-2 mb-4">
-        {QUEUE_FILTERS.map((f) => (
-          <button
-            key={f.label}
-            onClick={() => setStatusFilter(f.status)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              statusFilter === f.status
-                ? 'bg-brand-600 text-white'
-                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="card mb-6">
-        <div className="flex flex-wrap gap-4">
-          <div className="flex-1 min-w-[200px] relative">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by title, ID, or attack type..."
-              className="input pl-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+      <section className="flex-1 min-w-0 flex flex-col">
+        <div className="px-5 pt-5 pb-3 shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-xl font-semibold truncate">{label}</h1>
+            <div className="flex items-center gap-2">
+              <button className="btn-basic px-2" onClick={() => { views.refetch(); list.refetch() }} title="Refresh" aria-label="Refresh">
+                <RefreshCw className={`w-4 h-4 ${list.isFetching ? 'animate-spin' : ''}`} />
+              </button>
+              <button className="btn-secondary" onClick={() => setCreating(true)}><Plus className="w-4 h-4" /> New incident</button>
+            </div>
           </div>
-          <select
-            className="input w-auto"
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
-          >
-            <option value="">All Severities</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
+          <div className="flex items-center gap-2 mt-3">
+            <button className={showFilters ? 'btn-secondary bg-brand-50' : 'btn-secondary'} onClick={() => setShowFilters((s) => !s)}>
+              <Filter className="w-3.5 h-3.5" /> Filter
+            </button>
+            {showFilters && (
+              <>
+                <form onSubmit={(e) => { e.preventDefault(); update({ search: searchDraft.trim() || null }) }} className="w-64">
+                  <input className="input" placeholder="Subject, ID, attack type… then Enter" value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)} aria-label="Search this view" />
+                </form>
+                <select className="input w-40" value={severity} onChange={(e) => update({ severity: e.target.value || null })} aria-label="Severity">
+                  <option value="">Any severity</option>
+                  {SEVERITIES.map((s) => <option key={s} value={s}>{SEVERITY_META[s].label}</option>)}
+                </select>
+                {(search || severity) && (
+                  <button className="btn-ghost" onClick={() => { setSearchDraft(''); update({ search: null, severity: null }) }}><X className="w-3.5 h-3.5" /> Clear</button>
+                )}
+              </>
+            )}
+          </div>
+          <div className="text-[13px] text-ink-muted mt-3">
+            {list.data ? `${list.data.total.toLocaleString()} incident${list.data.total === 1 ? '' : 's'}` : ' '}
+            {search && <> matching "<span className="text-ink">{search}</span>"</>}
+          </div>
         </div>
-      </div>
 
-      {isLoading ? (
-        <div className="text-gray-500">Loading incidents...</div>
-      ) : isError ? (
-        <div className="card text-center py-12 text-red-600">
-          Failed to load incidents. Please try again.
+        <div className="flex-1 min-h-0 overflow-auto border-t border-line">
+          {list.isLoading ? <Loading />
+            : list.isError ? <div className="p-5"><ErrorNote>Could not load incidents. Check that the backend is running.</ErrorNote></div>
+            : list.data.items.length === 0
+              ? <EmptyState icon={<Inbox className="w-8 h-8" />} title="No incidents in this view">{search || severity ? 'Try clearing the filters.' : 'Incidents that match this view will show up here.'}</EmptyState>
+              : (
+                <>
+                  <IncidentTable incidents={list.data.items} users={names} grouped={view !== 'recent'} />
+                  <Pager page={page} pageSize={PAGE_SIZE} total={list.data.total} onPage={(p) => update({ page: String(p) })} />
+                </>
+              )}
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="card text-center py-12 text-gray-500">
-          No incidents found.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((incident) => (
-            <Link
-              key={incident.id}
-              to={`/incidents/${incident.id}`}
-              className={`card block hover:shadow-md transition-shadow border-l-4 ${SEVERITY_BORDER[incident.severity] || 'border-l-gray-300'}`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className={`badge text-xs ${SEVERITY_COLORS[incident.severity] || ''}`}>
-                      {incident.severity}
-                    </span>
-                    <span className={`badge text-xs ${STATUS_COLORS[incident.status] || ''}`}>
-                      {incident.status.replace(/_/g, ' ')}
-                    </span>
-                    {incident.status === 'awaiting_analyst' && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700">
-                        <Bell className="h-3 w-3" />
-                        Action Required
-                      </span>
-                    )}
-                    {incident.attack_type && (
-                      <span className="badge text-xs bg-purple-50 text-purple-700">
-                        {incident.attack_type}
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="font-medium truncate">{incident.title}</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {incident.id.slice(0, 8)} &middot; {formatRelative(incident.created_at)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-4 ml-4 shrink-0">
-                  {incident.confidence_score != null && incident.confidence_score > 0 && (
-                    <div className="text-right">
-                      <div className="text-xs text-gray-500">Confidence</div>
-                      <div className="font-semibold text-sm">
-                        {Math.round(incident.confidence_score * 100)}%
-                      </div>
-                    </div>
-                  )}
-                  {incident.mitre_tactics && incident.mitre_tactics.length > 0 && (
-                    <div className="text-right hidden md:block">
-                      <div className="text-xs text-gray-500">MITRE</div>
-                      <div className="text-xs font-medium text-purple-700">
-                        {incident.mitre_tactics.length} tactic{incident.mitre_tactics.length > 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+      </section>
+
+      {creating && <NewIncidentModal onClose={() => setCreating(false)} />}
     </div>
   )
 }

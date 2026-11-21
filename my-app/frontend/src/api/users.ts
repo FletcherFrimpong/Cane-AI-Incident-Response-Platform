@@ -7,6 +7,14 @@ export const usersApi = {
 
   list: () => api.get('/users/'),
 
+  assignable: () => api.get('/users/assignable'),
+
+  create: (data: { email: string; password: string; full_name: string; role: string }) =>
+    api.post('/users/', data),
+
+  setActive: (userId: string, isActive: boolean) =>
+    api.put(`/users/${userId}/active`, { is_active: isActive }),
+
   updateRole: (userId: string, role: string) =>
     api.put(`/users/${userId}/role`, { role }),
 

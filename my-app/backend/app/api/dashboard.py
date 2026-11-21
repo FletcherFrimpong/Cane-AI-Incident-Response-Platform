@@ -8,6 +8,7 @@ from app.dependencies import get_current_active_user
 from app.models.user import User
 from app.models.incident import Incident, IncidentSeverity, IncidentStatus, IncidentTimeline
 from app.models.log_event import LogEvent
+from app.models.action import ActionLog, ActionStatus
 from app.schemas.dashboard import DashboardOverview, ThreatDistribution, AnalystWorkload
 
 router = APIRouter()
@@ -15,7 +16,7 @@ router = APIRouter()
 
 @router.get("/overview", response_model=DashboardOverview)
 async def dashboard_overview(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     now = datetime.now(timezone.utc)
@@ -67,7 +68,21 @@ async def dashboard_overview(
         durations = [(i.resolved_at - i.created_at).total_seconds() / 60 for i in resolved]
         mttr = sum(durations) / len(durations)
 
+    not_closed = Incident.status.notin_([IncidentStatus.CLOSED, IncidentStatus.FALSE_POSITIVE])
+    mine = (await db.execute(
+        select(func.count(Incident.id)).where(Incident.assigned_to == current_user.id, not_closed)
+    )).scalar() or 0
+    closed_week = (await db.execute(
+        select(func.count(Incident.id)).where(Incident.resolved_at >= week_start)
+    )).scalar() or 0
+    pending_actions = (await db.execute(
+        select(func.count(ActionLog.id)).where(ActionLog.status == ActionStatus.PENDING_APPROVAL)
+    )).scalar() or 0
+
     return DashboardOverview(
+        assigned_to_me=mine,
+        closed_this_week=closed_week,
+        pending_actions=pending_actions,
         total_incidents=total,
         open_incidents=open_count,
         critical_incidents=severity_counts.get("critical", 0),
@@ -83,7 +98,7 @@ async def dashboard_overview(
 
 @router.get("/threats", response_model=list[ThreatDistribution])
 async def threat_distribution(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     result = await db.execute(
@@ -100,7 +115,7 @@ async def threat_distribution(
 
 @router.get("/geo")
 async def geo_threats(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Get geographic threat data from log events with location info."""
@@ -136,7 +151,7 @@ async def geo_threats(
 @router.get("/timeline")
 async def activity_timeline(
     limit: int = 50,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Recent activity feed."""
@@ -146,14 +161,20 @@ async def activity_timeline(
         .limit(limit)
     )
     entries = result.scalars().all()
+    ids = {e.incident_id for e in entries}
+    titles = {}
+    if ids:
+        rows = await db.execute(select(Incident.id, Incident.title).where(Incident.id.in_(ids)))
+        titles = {row[0]: row[1] for row in rows.all()}
     return [
         {
             "id": str(e.id),
             "incident_id": str(e.incident_id),
+            "incident_title": titles.get(e.incident_id),
             "event_type": e.event_type,
             "actor": e.actor,
             "description": e.description,
-            "timestamp": str(e.timestamp),
+            "timestamp": e.timestamp.isoformat(),
         }
         for e in entries
     ]

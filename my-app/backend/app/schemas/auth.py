@@ -1,4 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
+
+from app.models.user import UserRole
 
 
 class LoginRequest(BaseModel):
@@ -8,9 +10,9 @@ class LoginRequest(BaseModel):
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
-    full_name: str
-    role: str = "tier1_analyst"
+    password: str = Field(min_length=10, max_length=128)
+    full_name: str = Field(min_length=1, max_length=255)
+    role: UserRole = UserRole.TIER1_ANALYST
 
 
 class TokenResponse(BaseModel):

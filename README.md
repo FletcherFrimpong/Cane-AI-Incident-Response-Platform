@@ -4,16 +4,18 @@ An AI-powered security incident response platform that ingests Microsoft securit
 
 ## Key Features
 
-- **Fully Automated TDIR Pipeline** - End-to-end automation from log ingestion to containment. Logs are ingested, normalized, correlated into incidents, enriched with threat intelligence, triaged by AI, and contained — all without human intervention. Analysts only engage when the AI flags incidents for review.
-- **Auto-Enrichment** - Before AI analysis, IOCs (IPs, file hashes, domains, URLs) are extracted from log events and queried against VirusTotal and AbuseIPDB. Threat intel scores are fed into the LLM prompt for more accurate triage decisions.
-- **AI-Powered Triage** - Supports Claude, OpenAI, and Azure OpenAI via system-level API key or per-user BYOK. The AI classifies severity, identifies attack types, maps to MITRE ATT&CK, extracts IOCs, assesses kill chain phase, and recommends response actions with auto-execute flags.
-- **Auto-Containment** - AI-recommended actions with confidence >= 95% auto-execute via integrations (block IP, isolate host, disable account). Below-threshold actions queue in the Action Queue for analyst approval with full context.
-- **Real-Time Log Ingestion** - Ingest security logs via webhooks or batch file upload. Supports all 14 Azure Sentinel ASIM log types with automatic normalization.
-- **Event Correlation** - Automatically groups related events by correlation ID, detects attack patterns (ransomware, phishing, exfiltration, etc.), and creates incidents.
-- **NIST 800-61 Playbooks** - 7 pre-built incident response playbooks (Ransomware, Phishing, Data Exfiltration, DDoS, Unauthorized Access, Malware, Insider Threat) with 59 guided steps.
-- **SOC Analyst Queue** - Incidents sorted by severity and status priority. Critical/awaiting-analyst incidents surface first. Incident Detail page serves as the full response hub: AI analysis, MITRE mapping, IOCs, action approval, timeline with analyst notes.
-- **Real Platform Integrations** - Microsoft Graph, Sentinel, Defender for Endpoint, VirusTotal, AbuseIPDB. All with OAuth2/API key auth, encrypted credential storage, connection testing, and health monitoring.
-- **Role-Based Access** - Four roles (Tier 1 Analyst, Tier 2 Analyst, Manager, Admin) with granular permissions.
+- **Ticket-queue workspace** - The UI works like a help desk: views with live counts (Needs your attention, Assigned to you, Unassigned…), a dense incident queue grouped by severity, and an incident page with properties on the left, the conversation in the middle and AI analysis plus response actions on the right.
+- **Automated TDIR pipeline** - Logs are ingested, normalized, correlated into incidents, enriched with threat intelligence and triaged by AI. Analysts are pulled in when the AI asks for review or proposes an action that needs a person.
+- **Incidents only for what matters** - A correlated group opens an incident when its worst event reaches medium severity, a security product raised an alert, or a known attack pattern is recognised. Routine informational events stay as searchable logs and are pulled into the incident if the group escalates later.
+- **Auto-Enrichment** - Before AI analysis, IOCs (IPs, file hashes, domains, URLs) are extracted from log events and queried against VirusTotal and AbuseIPDB when those integrations are configured.
+- **AI-Powered Triage** - Claude, OpenAI or Azure OpenAI, via a system-level key or a per-user key (BYOK). The model classifies severity, identifies the attack type, maps to MITRE ATT&CK, extracts IOCs and recommends response actions.
+- **Guarded containment** - The model only ever suggests. A rule layer (`app/services/triage_guard.py`) decides what happens to each suggestion: see [How auto-containment is gated](#how-auto-containment-is-gated).
+- **Real-Time Log Ingestion** - Webhook, batch API or file upload. Supports all 14 Azure Sentinel ASIM log types with automatic normalization. Machine senders authenticate with an ingest API key.
+- **NIST 800-61 Playbooks** - 7 built-in playbooks (59 steps) loaded automatically at startup, attached by AI triage or by hand, and worked step by step from the incident page. When the playbook reaches an automated step (isolate hosts, block C2 addresses), it proposes that action for each matching host, address or account in the incident's evidence, and moves on by itself once they have run.
+- **Live updates** - Open pages refresh the moment an incident or the action queue changes (server-sent events over Redis), with slow polling as a fallback.
+- **Notifications, paging and tickets** - Serious incidents and approval requests go to Slack, Teams, PagerDuty, Opsgenie or any webhook; Jira and ServiceNow tickets are opened, commented and closed in step with the incident.
+- **27 integrations** - Response tools, threat intelligence, identity and device context, chat and paging, ticketing, and log sources. Encrypted credential storage, connection testing, scheduled health checks. New integrations start in dry-run mode.
+- **Role-Based Access** - Four roles (Tier 1 Analyst, Tier 2 Analyst, Manager, Admin). Accounts are created by an admin.
 
 ## Architecture
 
@@ -24,7 +26,7 @@ An AI-powered security incident response platform that ingests Microsoft securit
                                     |  Tailwind CSS    |
                                     +--------+---------+
                                              |
-                                        WebSocket + REST
+                                          REST (polling)
                                              |
 +------------------+            +------------+-------------+
 |  Microsoft       |  Webhook   |                          |
@@ -65,7 +67,7 @@ An AI-powered security incident response platform that ingests Microsoft securit
 
 ### Automated TDIR Pipeline
 
-The platform implements a fully automated Threat Detection, Investigation, and Response (TDIR) pipeline following NIST 800-61 and industry best practices. Every step runs without human intervention — analysts only get involved when the AI flags an incident for review.
+The platform implements an automated Threat Detection, Investigation, and Response (TDIR) pipeline following NIST 800-61. Ingestion through triage runs without a person; containment is automatic only for a short allow-list of low-blast-radius actions, and everything else waits for an analyst.
 
 ```
 1. DETECTION & INGESTION
@@ -75,10 +77,12 @@ The platform implements a fully automated Threat Detection, Investigation, and R
    Log Normalizer (14 ASIM schema types)
            |
            v
-   Correlation Engine (group by CorrelationId + time window)
+   Correlation Engine (group by CorrelationId)
            |
-           +---> Existing incident? Link event to it
-           +---> New correlation group? Create incident
+           +---> Existing incident? Link event, raise severity if needed
+           +---> Group reaches medium severity / has an alert /
+           |     matches an attack pattern? Create incident
+           +---> Otherwise keep as logs (linked later if it escalates)
            |
            v
    Store in PostgreSQL (log_events table, JSONB raw data)
@@ -108,10 +112,12 @@ The platform implements a fully automated Threat Detection, Investigation, and R
    System LLM API key (CANE_AUTO_TRIAGE_API_KEY)
            |
            v
-   Claude / OpenAI / Azure OpenAI (temperature: 0.1)
+   Claude / OpenAI / Azure OpenAI
            |
            v
-   Structured JSON response:
+   Structured JSON response, strictly validated
+   (wrong shape or confidence outside 0-1 = failed triage,
+    incident goes to an analyst):
    - Severity classification (critical/high/medium/low/info)
    - Attack type identification
    - MITRE ATT&CK mapping (tactics + technique IDs)
@@ -125,23 +131,25 @@ The platform implements a fully automated Threat Detection, Investigation, and R
            v
    Update incident + Store AI analysis + Match playbook
 
-4. AUTO-CONTAINMENT
-   For each AI-recommended action:
+4. CONTAINMENT (guarded)
+   For each AI-recommended action, the guard decides:
+           |
+           +-- Not an allowed action type, or its target does not
+           |   appear in the incident's own events?  --> dropped (and recorded)
+           |
+           +-- Allow-listed type (block IP / URL / file hash)
+           |   AND model flagged it auto-executable
+           |   AND model did not ask for human review
+           |   AND confidence >= 0.95
+           |   AND triage was automatic (not analyst-triggered)
+           |        --> executed via Microsoft Defender
+           |
+           +-- Everything else (isolate host, disable account,
+               revoke sessions, ...)  --> Action Queue, awaiting approval
            |
            v
-   Confidence >= 0.95 AND can_auto_execute?
-           |
-          YES --> Execute immediately via integration:
-           |      - Block IP (Microsoft Defender)
-           |      - Isolate host (Microsoft Defender)
-           |      - Disable account (Microsoft Graph)
-           |      - Revoke sessions (Microsoft Graph)
-           |      - Block URL/hash (Microsoft Defender)
-           |
-          NO --> Create pending action for analyst approval
-           |
-           v
-   All actions logged in audit trail with full context
+   Each action is committed before and after the external call,
+   and written to the incident timeline
 
 5. ANALYST REVIEW (only when needed)
    Incident Detail page shows:
@@ -193,7 +201,7 @@ my-app/
 │   │   ├── database.py         # Async SQLAlchemy engine
 │   │   ├── models/             # 11 SQLAlchemy ORM models
 │   │   ├── schemas/            # Pydantic request/response schemas
-│   │   ├── api/                # FastAPI route modules (62 endpoints)
+│   │   ├── api/                # FastAPI route modules
 │   │   │   ├── auth.py         # Register, login, refresh
 │   │   │   ├── users.py        # Profile, API key management
 │   │   │   ├── incidents.py    # CRUD, assign, escalate, close, timeline
@@ -208,7 +216,8 @@ my-app/
 │   │   │   ├── correlation.py      # Event correlation engine
 │   │   │   ├── log_ingestion.py    # Ingestion orchestration
 │   │   │   ├── enrichment_service.py  # IOC extraction + threat intel queries
-│   │   │   ├── triage_service.py   # AI triage + auto-containment orchestration
+│   │   │   ├── triage_service.py   # AI triage orchestration
+│   │   │   ├── triage_guard.py     # Validates LLM output, decides what may run
 │   │   │   ├── playbook_service.py # Playbook execution engine
 │   │   │   ├── action_service.py   # Auto-response + approval workflow
 │   │   │   ├── integration_service.py # Credential encryption + health
@@ -232,15 +241,19 @@ my-app/
 │   │   │   └── seed_playbooks.py   # 7 NIST 800-61 playbooks (59 steps)
 │   │   └── workers/
 │   │       ├── celery_app.py       # Celery config + beat schedule
+│   │       ├── dispatch.py         # Queue work after the DB commit
+│   │       ├── health_checks.py    # Scheduled integration health checks
 │   │       └── triage_tasks.py     # Auto-triage background tasks
-│   └── alembic/                # Database migrations
+│   ├── tests/                  # Unit tests (pytest)
+│   ├── scripts/                # e2e_test.py, ingest_synthetic_logs.py
+│   └── alembic/                # Migration environment (no revisions yet)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx             # Routes + auth guard
 │   │   ├── api/                # Axios API client layer
 │   │   ├── store/              # Zustand state management
 │   │   ├── pages/              # Dashboard, Incidents, Action Queue, Playbooks, Logs, Settings
-│   │   ├── components/         # Layout (AppShell, Sidebar)
+│   │   ├── components/         # App shell (icon rail + top bar), queue table, shared UI
 │   │   ├── types/              # TypeScript interfaces
 │   │   └── utils/              # Constants, formatters
 │   └── package.json
@@ -282,15 +295,24 @@ All playbooks follow NIST SP 800-61 phases: Detection & Analysis, Containment, E
 
 ## Platform Integrations
 
-| Platform | Auth | Capabilities |
-|----------|------|-------------|
-| Microsoft Graph | OAuth2 Client Credentials | Disable/enable user, revoke sessions, force password reset, read security alerts, read risky users |
-| Microsoft Sentinel | OAuth2 Client Credentials | Run KQL queries, list/update incidents, create watchlists |
-| Microsoft Defender for Endpoint | OAuth2 Client Credentials | Isolate/release machine, AV scan, block IP/URL/hash, collect investigation package |
-| VirusTotal | API Key | File hash, IP, domain, URL reputation lookup |
-| AbuseIPDB | API Key | IP reputation check, report malicious IPs |
+27 connectors, added under **Settings → Integrations**. A connector declares what it can do, and the platform sends work to every connected one with that ability: blocking an address reaches each firewall and EDR that is connected, isolating a host reaches whichever EDR knows it.
 
-All credentials are AES-256-GCM encrypted at rest. Each integration supports dry-run mode and automated health checks.
+| Group | Connectors | What they do |
+|-------|------------|--------------|
+| Response | Microsoft Defender for Endpoint, Microsoft Graph, Microsoft Sentinel, CrowdStrike Falcon, SentinelOne, Okta, Palo Alto (PAN-OS), Fortinet FortiGate | Block IP / URL / file hash, isolate or release a host, antivirus scan, disable an account, revoke sessions, force a password reset, remove a phishing email from the mailboxes it reached |
+| Threat intelligence | VirusTotal, AbuseIPDB, GreyNoise, urlscan.io, RDAP (domain age), GeoIP (local database), Hybrid Analysis, MISP, OpenCTI | Reputation for the IPs, domains, URLs and file hashes in an incident |
+| Context | Microsoft Graph (Entra ID, Intune), Okta, Defender, CrowdStrike, SentinelOne | Who an account is (title, manager, admin role) and what a host is (owner, OS, isolation state) |
+| Notifications | Slack, Microsoft Teams, PagerDuty, Opsgenie, generic signed webhook | Announce serious incidents and approval requests; resolve the page when the incident closes |
+| Ticketing | Jira, ServiceNow | Open a ticket for each serious incident, mirror analyst notes, close it with the incident |
+| Sources | Splunk, Elastic Security, AWS GuardDuty | Polled every minute; events flow through normal ingestion |
+
+Credentials are AES-256-GCM encrypted at rest. New integrations start in **dry-run**: anything that would change an outside system is logged as if it ran and nothing is sent, until an admin chooses **Go live**.
+
+**How far each connector has been verified.** Every connector has contract tests that run it against a fake HTTP layer and check the exact requests against the vendor's published API. That is not the same as having run against the real service. RDAP and the generic webhook have been exercised for real; the others need a first run against your own account, in dry-run and then live on a test asset, before you rely on them. See `docs/INTEGRATIONS.md` for what was and was not confirmed per connector.
+
+### Approving from Slack
+
+Approval requests posted to Slack carry Approve and Reject buttons. Set the Slack app's Interactivity Request URL to `https://<your-host>/api/v1/hooks/slack/actions`. Each click is verified against the app's signing secret, and the person clicking must have an active Cane AI account with the same email and a role that could approve in the app itself.
 
 ## Getting Started
 
@@ -304,38 +326,33 @@ All credentials are AES-256-GCM encrypted at rest. Each integration supports dry
 
 ```bash
 cd my-app
-docker-compose up --build
+docker compose up --build
 ```
 
-On first run, create the database tables:
+On startup the backend applies database migrations (`scripts/migrate.py`, Alembic) and loads the 7 built-in playbooks.
 
-```bash
-docker-compose exec backend python -c "
-import asyncio
-from app.database import engine
-from app.models.base import Base
-import app.models
-async def init():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print('Tables created')
-asyncio.run(init())
-"
-```
-
-Register your first user:
+Create the first account. The first account ever registered becomes the administrator; after that, registration is closed and admins add people under **Settings → Team**.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com", "password": "changeme", "full_name": "Admin", "role": "admin"}'
+  -d '{"email": "admin@example.com", "password": "choose-a-long-password", "full_name": "Admin"}'
 ```
 
 Services will be available at:
-- **Frontend**: http://localhost:5173
+- **Frontend**: http://localhost:5173 (set `CANE_FRONTEND_PORT` in `my-app/.env` to change it)
 - **Backend API**: http://localhost:8000
 - **API Docs (Swagger)**: http://localhost:8000/docs
-- **API Docs (ReDoc)**: http://localhost:8000/redoc
+
+Load the sample data (14 log types plus 4 attack scenarios):
+
+```bash
+docker compose exec backend python scripts/ingest_synthetic_logs.py
+```
+
+#### Trying the pipeline without an LLM key
+
+Set `CANE_AUTO_TRIAGE_PROVIDER=mock` in `my-app/.env`. The mock provider is a small set of fixed rules, **not an AI model**: it exists so ingestion → triage → action queue → playbook can be exercised locally at no cost. Everything it produces is labelled `mock`, and it refuses to run unless `CANE_DEBUG=true`.
 
 ### Local Development
 
@@ -347,12 +364,12 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 
 # Start PostgreSQL and Redis (via Docker or locally)
-docker-compose up postgres redis -d
+docker compose up postgres redis -d
 
-# Run migrations
-alembic upgrade head
+# Apply database migrations (also safe on a database from before migrations existed)
+python scripts/migrate.py
 
-# Start the server
+# Start the server (built-in playbooks are loaded on startup)
 uvicorn app.main:app --reload
 ```
 
@@ -360,53 +377,108 @@ uvicorn app.main:app --reload
 ```bash
 cd my-app/frontend
 npm install
-npm run dev
+VITE_API_TARGET=http://localhost:8000 npm run dev
 ```
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and configure:
+For Docker, put these in `my-app/.env` (gitignored). For a local backend, copy `backend/.env.example` to `backend/.env`.
 
 ```env
-# Required
+# Required outside local development. With CANE_DEBUG=false the backend refuses to
+# start while either is still the default from this repository.
+CANE_JWT_SECRET_KEY=            # openssl rand -hex 32
+CANE_ENCRYPTION_MASTER_KEY=     # openssl rand -hex 32
+CANE_DEBUG=false
+
 CANE_DATABASE_URL=postgresql+asyncpg://cane:cane_secret@localhost:5432/cane_db
 CANE_REDIS_URL=redis://localhost:6379/0
-CANE_JWT_SECRET_KEY=your-secret-key-here
-CANE_ENCRYPTION_MASTER_KEY=your-encryption-key-here
 
-# Automated AI Triage (set API key to enable)
+# Automated AI triage
 CANE_AUTO_TRIAGE_ENABLED=true
-CANE_AUTO_TRIAGE_PROVIDER=claude          # claude, openai, or azure_openai
+CANE_AUTO_TRIAGE_PROVIDER=claude          # claude, openai, azure_openai (or mock, debug only)
 CANE_AUTO_TRIAGE_API_KEY=sk-ant-...       # System-level LLM API key
-CANE_AUTO_TRIAGE_MODEL=                   # Optional model override
+CANE_AUTO_TRIAGE_MODEL=                   # Optional model override (Claude default: claude-opus-5-5)
+CANE_AUTO_TRIAGE_AZURE_ENDPOINT=          # Required for azure_openai
 
-# Auto-enrichment (query threat intel before AI triage)
-CANE_AUTO_ENRICHMENT_ENABLED=true
-CANE_AUTO_ENRICHMENT_MAX_IOCS=4          # Max IOCs per type to query (rate limit control)
+# Ingestion
+CANE_INGEST_API_KEY=                      # Machine senders send this as the X-API-Key header
+CANE_INCIDENT_MIN_SEVERITY=medium         # Correlated groups below this stay as logs
 
-# Auto-containment threshold
-CANE_AUTO_RESPONSE_CONFIDENCE_THRESHOLD=0.95  # Actions above this auto-execute
+# Containment
+CANE_AUTO_RESPONSE_CONFIDENCE_THRESHOLD=0.95
+CANE_AUTO_EXECUTE_ACTION_TYPES='["block_ip","block_url","block_file_hash"]'
+
+# Accounts
+CANE_ALLOW_SELF_REGISTRATION=false        # true lets anyone self-register, as tier 1 only
+
+# Links in notifications and tickets point here
+CANE_PUBLIC_URL=https://cane.example.com
+CANE_NOTIFY_MIN_SEVERITY=high             # Announce incidents at or above this severity
+CANE_TICKET_MIN_SEVERITY=high             # Open tickets at or above this severity
+CANE_SOURCE_POLL_SECONDS=60               # How often log sources are polled
 ```
 
-When `CANE_AUTO_TRIAGE_API_KEY` is set, the full TDIR pipeline runs automatically:
-1. Incident created from correlated logs
-2. IOCs extracted and queried against VirusTotal/AbuseIPDB (if configured in Settings > Integrations)
-3. AI triages the incident with enriched data
-4. High-confidence actions auto-execute via integrations; others queue for analyst approval
+### Sending logs from Sentinel (or anything else)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/logs/ingest \
+  -H "X-API-Key: $CANE_INGEST_API_KEY" -H "Content-Type: application/json" \
+  -d '{"schemaId": "securityalert", "data": {"TimeGenerated": "2026-11-21T08:29:00Z", "DisplayName": "Malware detected", "AlertSeverity": "High"}}'
+```
+
+## How auto-containment is gated
+
+Log content is attacker-controlled (email subjects, URLs, user names, command lines) and it goes into the LLM prompt, so the model's reply is treated as untrusted. For every action the model recommends:
+
+| Check | If it fails |
+|-------|-------------|
+| The action is one the AI may propose (block IP/URL/hash, isolate host, AV scan, disable account, revoke sessions, force password reset). Re-enabling an account, releasing a host and free-form KQL are analyst-only. | Dropped |
+| The target literally appears in the incident's own events, and an IP to block is a public address | Dropped |
+| The action type is on `CANE_AUTO_EXECUTE_ACTION_TYPES` | Queued for approval |
+| The model marked it auto-executable and did **not** ask for human review | Queued for approval |
+| Confidence is a number in 0-1 at or above the threshold | Queued for approval |
+| Triage ran automatically (analyst-triggered triage never executes anything) | Queued for approval |
+
+Dropped suggestions are kept on the analysis with the reason and shown on the incident page. A reply that fails validation is recorded as a failed triage and the incident goes to an analyst. Integrations default to **dry-run**, where actions are logged as if they ran and nothing is changed, until an admin chooses **Go live**.
+
+## Testing
+
+```bash
+# Unit tests: the guard, normalisation, incident rules
+docker compose exec backend python -m pytest tests -q
+
+# End-to-end against the running stack (69 checks: auth, RBAC, ingestion,
+# correlation, triage, action approval, playbooks, incident lifecycle)
+CANE_E2E_EMAIL=admin@example.com CANE_E2E_PASSWORD=... python my-app/backend/scripts/e2e_test.py --ai
+```
+
+`--ai` requires the triage steps to pass; it needs a funded LLM key or the mock provider. The script signs in with the admin account given in `CANE_E2E_EMAIL` and `CANE_E2E_PASSWORD`.
+
+## Known gaps
+
+- **Integrations are verified against published APIs, not live accounts** (see Platform Integrations above).
+- **Multi-tenancy**: `tenant_id` is stored but nothing filters by it. Treat a deployment as single-tenant.
+- **Audit trail**: actions and incident changes are on each incident's timeline. Logins, role changes and integration edits are not yet recorded in the `audit_trail` table.
+- **Sessions**: refresh tokens are not revocable individually. Deactivating an account blocks its tokens immediately.
+- **Slack approvals need a public URL** for Slack to call. Teams notifications are link-only: a Teams webhook cannot receive button clicks.
+- **GeoIP needs a database file** you download yourself (MaxMind GeoLite2 or DB-IP Lite, `.mmdb`), with its path set on the integration.
 
 ## API Overview
 
 | Endpoint Group | Routes | Description |
 |---------------|--------|-------------|
-| `/api/v1/auth` | 3 | Register, login, refresh token |
-| `/api/v1/users` | 6 | Profile, roles, API key management |
+| `/api/v1/auth` | 3 | Register (first account / admin only), login, refresh token |
+| `/api/v1/users` | 9 | Profile, team management (create, role, deactivate), API keys |
 | `/api/v1/logs` | 5 | Ingest, batch, upload, query, schemas |
-| `/api/v1/incidents` | 9 | CRUD, assign, escalate, close, timeline, evidence, notes |
+| `/api/v1/incidents` | 10 | Queue views with counts, search, CRUD, assign, escalate, close, timeline, evidence, notes |
 | `/api/v1/triage` | 4 | AI analyze, results, recommendations, correlate |
-| `/api/v1/playbooks` | 8 | CRUD, steps, execute |
+| `/api/v1/playbooks` | 9 | CRUD, steps, attach to incident, advance step |
 | `/api/v1/actions` | 4 | Execute, approve, reject, history |
 | `/api/v1/dashboard` | 4 | Overview, threats, geo, timeline |
 | `/api/v1/integrations` | 8 | CRUD, platforms, test, health |
+| `/api/v1/events` | 1 | Live update stream (server-sent events) |
+| `/api/v1/hooks` | 1 | Slack approval buttons (signature-verified) |
 
 ## Role-Based Access Control
 
@@ -421,12 +493,14 @@ When `CANE_AUTO_TRIAGE_API_KEY` is set, the full TDIR pipeline runs automaticall
 
 ## Security
 
-- JWT authentication with short-lived access tokens (15 min) and rotatable refresh tokens (7 days)
-- AES-256-GCM encryption for all stored API keys and integration credentials
-- Role-based access control on all endpoints
-- Request logging middleware with audit trail
-- CORS configuration for frontend origin
-- Input validation via Pydantic on all API endpoints
+- First-account bootstrap, then admin-created accounts. The role in a registration request is ignored unless an admin sends it.
+- The backend refuses to start with the default JWT or encryption secrets unless `CANE_DEBUG=true`.
+- JWT access tokens (15 min) and refresh tokens (7 days); deactivated accounts are rejected on every request.
+- AES-256-GCM encryption for stored API keys and integration credentials.
+- Role checks on every endpoint; containment needs tier 2+, playbook edits manager+, integrations and people admin.
+- LLM output is validated and gated before it can cause an action (see above).
+- Targets are URL-encoded before being placed in integration API paths.
+- Batch and upload size limits on ingestion; malformed events are rejected individually.
 
 ## License
 

@@ -2,18 +2,24 @@
 
 import logging
 from typing import Any
-from app.integrations.base_client import BaseIntegrationClient, OAuth2ClientCredentialsMixin
+from app.integrations.base_client import BaseIntegrationClient, OAuth2ClientCredentialsMixin, seg
+from app.integrations.defender_hosts import DefenderHostResolver
 
 logger = logging.getLogger("cane_ai.integrations.defender")
 
 
-class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
+class MicrosoftDefenderClient(DefenderHostResolver, BaseIntegrationClient, OAuth2ClientCredentialsMixin):
     platform_name = "microsoft_defender"
     display_name = "Microsoft Defender for Endpoint"
     description = "Isolate machines, run AV scans, block indicators, and collect investigation packages"
     auth_type = "oauth2_client_credentials"
     required_credentials = ["tenant_id", "client_id", "client_secret"]
     optional_config = []
+    actions = {
+        "block_ip": "block_ip", "block_url": "block_url", "block_file_hash": "block_file_hash",
+        "isolate_host": "isolate_host", "release_host": "release_host", "run_av_scan": "scan_host",
+    }
+    provides_context = ("host",)
     capabilities = [
         "isolate_machine",
         "release_machine",
@@ -44,6 +50,27 @@ class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         result = await self.test_connection()
         return {"status": "healthy" if result["success"] else "error", "message": result["message"]}
 
+    # ---- response actions as the platform calls them: the value is usually a hostname
+    # from the logs, so it is resolved to Defender's machine ID first.
+
+    async def _on_machine(self, name_or_id: str, verb: str, operation) -> dict:
+        if self.dry_run:
+            return self._dry(f"{verb} {name_or_id}")
+        machine_id = await self.resolve_machine_id(name_or_id)
+        if not machine_id:
+            return {"success": False, "not_found": True,
+                    "message": f"Defender for Endpoint has no machine named '{name_or_id}'"}
+        return await operation(machine_id)
+
+    async def isolate_host(self, machine_id: str) -> dict:
+        return await self._on_machine(machine_id, "isolate", self.isolate_machine)
+
+    async def release_host(self, machine_id: str) -> dict:
+        return await self._on_machine(machine_id, "release", self.release_machine)
+
+    async def scan_host(self, machine_id: str) -> dict:
+        return await self._on_machine(machine_id, "run an antivirus scan on", self.run_av_scan)
+
     async def isolate_machine(self, machine_id: str, comment: str = "Isolated by Cane AI") -> dict:
         """Isolate a machine from the network."""
         self._log_action("isolate_machine", {"machine_id": machine_id})
@@ -53,7 +80,7 @@ class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.post(
-            f"{self.BASE_URL}/machines/{machine_id}/isolate",
+            f"{self.BASE_URL}/machines/{seg(machine_id)}/isolate",
             headers=headers,
             json={"Comment": comment, "IsolationType": "Full"},
         )
@@ -69,7 +96,7 @@ class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.post(
-            f"{self.BASE_URL}/machines/{machine_id}/unisolate",
+            f"{self.BASE_URL}/machines/{seg(machine_id)}/unisolate",
             headers=headers,
             json={"Comment": comment},
         )
@@ -85,7 +112,7 @@ class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.post(
-            f"{self.BASE_URL}/machines/{machine_id}/runAntiVirusScan",
+            f"{self.BASE_URL}/machines/{seg(machine_id)}/runAntiVirusScan",
             headers=headers,
             json={"Comment": "Scan initiated by Cane AI", "ScanType": scan_type},
         )
@@ -171,7 +198,7 @@ class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.post(
-            f"{self.BASE_URL}/machines/{machine_id}/collectInvestigationPackage",
+            f"{self.BASE_URL}/machines/{seg(machine_id)}/collectInvestigationPackage",
             headers=headers,
             json={"Comment": "Package collected by Cane AI"},
         )
@@ -194,7 +221,7 @@ class MicrosoftDefenderClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.get(
-            f"{self.BASE_URL}/machines/{machine_id}",
+            f"{self.BASE_URL}/machines/{seg(machine_id)}",
             headers=headers,
         )
         response.raise_for_status()

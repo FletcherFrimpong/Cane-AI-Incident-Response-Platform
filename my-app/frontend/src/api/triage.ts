@@ -4,7 +4,7 @@ export const triageApi = {
   analyze: (incidentId: string, provider?: string, model?: string) =>
     api.post('/triage/analyze', {
       incident_id: incidentId,
-      provider: provider || 'claude',
+      provider: provider || null,
       model,
     }),
 
@@ -17,6 +17,6 @@ export const triageApi = {
   correlate: (correlationId: string, provider?: string) =>
     api.post('/triage/correlate', {
       correlation_id: correlationId,
-      provider: provider || 'claude',
+      provider: provider || null,
     }),
 }

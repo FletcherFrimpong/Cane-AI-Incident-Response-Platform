@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any
-from app.integrations.base_client import BaseIntegrationClient, OAuth2ClientCredentialsMixin
+from app.integrations.base_client import BaseIntegrationClient, OAuth2ClientCredentialsMixin, seg
 
 logger = logging.getLogger("cane_ai.integrations.sentinel")
 
@@ -14,6 +14,7 @@ class MicrosoftSentinelClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
     auth_type = "oauth2_client_credentials"
     required_credentials = ["tenant_id", "client_id", "client_secret"]
     optional_config = ["subscription_id", "resource_group", "workspace_name", "workspace_id"]
+    actions = {"run_kql_query": "run_kql_query"}
     capabilities = [
         "run_kql_query",
         "list_incidents",
@@ -50,7 +51,7 @@ class MicrosoftSentinelClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
             if workspace_id:
                 # Test with Log Analytics query
                 response = await client.post(
-                    f"https://api.loganalytics.io/v1/workspaces/{workspace_id}/query",
+                    f"https://api.loganalytics.io/v1/workspaces/{seg(workspace_id)}/query",
                     headers={**headers, "Authorization": f"Bearer {await self._get_log_analytics_token()}"},
                     json={"query": "Heartbeat | take 1"},
                 )
@@ -100,7 +101,7 @@ class MicrosoftSentinelClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         token = await self._get_log_analytics_token()
         client = await self.get_http_client()
         response = await client.post(
-            f"https://api.loganalytics.io/v1/workspaces/{workspace_id}/query",
+            f"https://api.loganalytics.io/v1/workspaces/{seg(workspace_id)}/query",
             headers={"Authorization": f"Bearer {token}"},
             json={"query": query, "timespan": timespan},
         )
@@ -127,7 +128,7 @@ class MicrosoftSentinelClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.put(
-            f"{self._sentinel_base_url}/incidents/{incident_id}?api-version=2023-11-01",
+            f"{self._sentinel_base_url}/incidents/{seg(incident_id)}?api-version=2023-11-01",
             headers=headers,
             json={"properties": updates},
         )
@@ -154,7 +155,7 @@ class MicrosoftSentinelClient(BaseIntegrationClient, OAuth2ClientCredentialsMixi
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.put(
-            f"{self._sentinel_base_url}/watchlists/{name}?api-version=2023-11-01",
+            f"{self._sentinel_base_url}/watchlists/{seg(name)}?api-version=2023-11-01",
             headers=headers,
             json={
                 "properties": {

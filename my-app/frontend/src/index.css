@@ -3,28 +3,43 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply text-gray-900 antialiased;
-  }
+  html { font-size: 14px; }
+  body { @apply text-ink bg-white antialiased; }
+  ::selection { @apply bg-brand-100; }
 }
 
 @layer components {
-  .btn-primary {
-    @apply bg-brand-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded text-[13px] font-medium whitespace-nowrap
+      transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300;
   }
-  .btn-secondary {
-    @apply bg-white text-gray-700 px-4 py-2 rounded-lg font-medium border border-gray-300 hover:bg-gray-50 transition-colors;
-  }
-  .btn-danger {
-    @apply bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors;
-  }
-  .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-6;
-  }
+  .btn-primary { @apply btn bg-brand-500 text-white hover:bg-brand-700; }
+  .btn-secondary { @apply btn bg-white text-brand-500 border border-brand-500 hover:bg-brand-50; }
+  .btn-basic { @apply btn bg-white text-ink-soft border border-line hover:bg-surface; }
+  .btn-danger { @apply btn bg-severity-critical text-white hover:bg-[#a3232f]; }
+  .btn-ghost { @apply btn text-brand-500 hover:bg-brand-50; }
+  .btn-sm { @apply h-7 px-2.5 text-xs; }
+
   .input {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-shadow;
+    @apply w-full h-8 px-2.5 bg-white border border-line rounded text-[13px] text-ink placeholder:text-ink-faint
+      focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100;
   }
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  textarea.input { @apply h-auto py-2 leading-5; }
+  select.input { @apply pr-7; }
+  .label { @apply block text-xs font-semibold text-ink mb-1; }
+  .hint { @apply text-xs leading-[17px] text-ink-muted mt-1; }
+
+  /* Dense data table, the core of every queue */
+  .table-queue { @apply w-full text-[13px] border-collapse; }
+  .table-queue thead th {
+    @apply text-left font-semibold text-ink px-3 h-9 border-b border-line bg-white sticky top-0 z-10 whitespace-nowrap;
   }
+  .table-queue tbody td { @apply px-3 h-9 border-b border-line-soft align-middle; }
+  .table-queue tbody tr.row { @apply cursor-pointer hover:bg-brand-50/60; }
+  .table-queue tbody tr.group-row td { @apply bg-surface-sunken text-xs text-ink-soft h-7 border-b border-line; }
+
+  .pill { @apply inline-flex items-center h-[18px] px-1.5 rounded-sm text-2xs font-bold tracking-wide whitespace-nowrap; }
+  .tag { @apply inline-flex items-center h-5 px-1.5 rounded bg-surface-sunken border border-line text-xs text-ink-soft whitespace-nowrap; }
+  .panel-title { @apply text-xs font-semibold text-ink-muted uppercase tracking-wide; }
+  .link { @apply text-brand-500 hover:underline cursor-pointer; }
 }

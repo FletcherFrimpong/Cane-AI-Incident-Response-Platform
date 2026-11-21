@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class TriageRequest(BaseModel):
     incident_id: uuid.UUID
-    provider: str = "claude"
+    provider: str | None = None  # None = the caller's default key, else the system key
     model: str | None = None
 
 
@@ -28,4 +28,4 @@ class TriageResponse(BaseModel):
 
 class CorrelationRequest(BaseModel):
     correlation_id: str
-    provider: str = "claude"
+    provider: str | None = None

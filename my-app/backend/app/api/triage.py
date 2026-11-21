@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,24 +17,34 @@ router = APIRouter()
 @router.post("/analyze", response_model=TriageResponse)
 async def analyze_incident(
     request: TriageRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Trigger AI triage analysis on an incident."""
-    analysis = await triage_incident(
-        db=db,
-        incident_id=request.incident_id,
-        user_id=current_user.id,
-        provider_name=request.provider,
-        model=request.model,
-    )
+    try:
+        analysis = await triage_incident(
+            db=db,
+            incident_id=request.incident_id,
+            user_id=current_user.id,
+            provider_name=request.provider,
+            model=request.model,
+            actor=current_user.email,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 - surface provider failures (bad key, no credit) readably
+        body = getattr(e, "body", None)
+        message = None
+        if isinstance(body, dict) and isinstance(body.get("error"), dict):
+            message = body["error"].get("message")
+        raise HTTPException(status_code=502, detail=f"LLM provider error: {message or e}")
     return analysis
 
 
 @router.get("/{incident_id}", response_model=list[TriageResponse])
 async def get_triage_results(
     incident_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Get all AI analysis results for an incident."""
@@ -43,26 +53,23 @@ async def get_triage_results(
         .where(AiAnalysis.incident_id == incident_id)
         .order_by(AiAnalysis.created_at.desc())
     )
-    analyses = result.scalars().all()
-    if not analyses:
-        raise NotFoundError("No triage results found for this incident")
-    return analyses
+    return result.scalars().all()
 
 
 @router.get("/{incident_id}/recommendations")
 async def get_recommendations(
     incident_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Get AI-recommended actions for an incident."""
     result = await db.execute(
         select(AiAnalysis)
-        .where(AiAnalysis.incident_id == incident_id, AiAnalysis.analysis_type == "triage")
+        .where(AiAnalysis.incident_id == incident_id, AiAnalysis.analysis_type.in_(["triage", "auto_triage"]))
         .order_by(AiAnalysis.created_at.desc())
         .limit(1)
     )
-    analysis = result.scalar_one_or_none()
+    analysis = result.scalars().first()
     if not analysis:
         raise NotFoundError("No triage analysis found. Run /triage/analyze first.")
 
@@ -79,7 +86,7 @@ async def get_recommendations(
 @router.post("/correlate")
 async def correlate_events(
     request: CorrelationRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Run AI correlation analysis on events sharing a correlation ID."""

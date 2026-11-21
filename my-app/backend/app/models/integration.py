@@ -40,6 +40,8 @@ class PlatformIntegration(Base, UUIDMixin, TimestampMixin):
         Enum(HealthStatus, name="health_status"), default=HealthStatus.UNKNOWN, nullable=False
     )
     last_health_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Connector bookkeeping the platform maintains (e.g. a log source's fetch cursor)
+    state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

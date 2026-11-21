@@ -1,10 +1,11 @@
 import json
 from fastapi import APIRouter, Depends, UploadFile, File, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_active_user
+from app.config import get_settings
+from app.dependencies import get_current_active_user, require_ingest_access
 from app.models.user import User
 from app.models.log_event import LogEvent
 from app.schemas.log_event import (
@@ -16,7 +17,8 @@ from app.schemas.log_event import (
 )
 from app.services.log_ingestion import ingest_single_event, ingest_batch, ingest_json_file
 from app.services.log_normalizer import get_supported_schemas
-from app.exceptions import NotFoundError
+from app.workers.dispatch import queue_auto_triage
+from app.exceptions import NotFoundError, ValidationError
 
 import uuid
 
@@ -26,11 +28,19 @@ router = APIRouter()
 @router.post("/ingest")
 async def ingest_log_event(
     event: LogEventIngest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    sender: str = Depends(require_ingest_access),
 ):
-    """Ingest a single log event (real-time webhook from Sentinel)."""
-    log_event = await ingest_single_event(db, event.schemaId, event.data)
+    """Ingest a single log event (real-time webhook from Sentinel).
+
+    Authenticate with a user token, or with the X-API-Key header set to
+    CANE_INGEST_API_KEY for machine senders."""
+    try:
+        log_event, new_incidents = await ingest_single_event(db, event.schemaId, event.data)
+    except ValueError as e:
+        raise ValidationError(str(e))
+    await db.commit()
+    await queue_auto_triage(new_incidents)
     return {
         "status": "ingested",
         "event_id": str(log_event.id),
@@ -38,30 +48,44 @@ async def ingest_log_event(
         "severity": log_event.severity,
         "correlation_id": log_event.correlation_id,
         "incident_id": str(log_event.incident_id) if log_event.incident_id else None,
+        "incident_created": bool(new_incidents),
     }
 
 
 @router.post("/batch")
 async def ingest_batch_events(
     batch: LogEventBatchIngest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    sender: str = Depends(require_ingest_access),
 ):
     """Ingest a batch of log events."""
+    limit = get_settings().ingest_max_batch_events
+    if len(batch.events) > limit:
+        raise ValidationError(f"Batch too large: {len(batch.events)} events (limit {limit})")
     events = [{"schemaId": e.schemaId, "data": e.data} for e in batch.events]
     result = await ingest_batch(db, events)
+    await db.commit()
+    await queue_auto_triage(result["incident_ids_created"])
     return result
 
 
 @router.post("/upload")
 async def upload_log_file(
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    sender: str = Depends(require_ingest_access),
 ):
     """Upload a JSON file containing log events."""
-    content = await file.read()
-    result = await ingest_json_file(db, content)
+    limit = get_settings().ingest_max_upload_bytes
+    content = await file.read(limit + 1)
+    if len(content) > limit:
+        raise ValidationError(f"File too large (limit {limit // (1024 * 1024)} MB)")
+    try:
+        result = await ingest_json_file(db, content)
+    except ValueError as e:
+        raise ValidationError(str(e))
+    await db.commit()
+    await queue_auto_triage(result["incident_ids_created"])
     return {
         "filename": file.filename,
         **result,
@@ -76,9 +100,10 @@ async def list_log_events(
     severity: str | None = None,
     correlation_id: str | None = None,
     source_ip: str | None = None,
+    search: str | None = None,
     time_from: str | None = None,
     time_to: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Query log events with filters."""
@@ -91,6 +116,12 @@ async def list_log_events(
         conditions.append(LogEvent.correlation_id == correlation_id)
     if source_ip:
         conditions.append(LogEvent.source_ip == source_ip)
+    if search:
+        like = f"%{search.strip()}%"
+        conditions.append(or_(
+            LogEvent.summary.ilike(like), LogEvent.host.ilike(like),
+            LogEvent.user_identity.ilike(like), LogEvent.correlation_id.ilike(like),
+        ))
     if time_from:
         from dateutil import parser
         conditions.append(LogEvent.time_generated >= parser.isoparse(time_from))
@@ -130,7 +161,7 @@ async def list_schemas(current_user: User = Depends(get_current_active_user)):
 @router.get("/{event_id}", response_model=LogEventDetailResponse)
 async def get_log_event(
     event_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """Get a single log event with full raw data."""

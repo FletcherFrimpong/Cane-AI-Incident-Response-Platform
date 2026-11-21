@@ -58,7 +58,7 @@ async def register_user(
     email: str,
     password: str,
     full_name: str,
-    role: str = "tier1_analyst",
+    role: str | UserRole = UserRole.TIER1_ANALYST,
 ) -> User:
     existing = await db.execute(select(User).where(User.email == email))
     if existing.scalar_one_or_none():

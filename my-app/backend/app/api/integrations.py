@@ -35,7 +35,7 @@ async def list_supported_platforms(
 
 @router.get("/", response_model=list[IntegrationResponse])
 async def list_integrations(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     """List all configured integrations (credentials masked)."""
@@ -48,7 +48,7 @@ async def list_integrations(
 @router.post("/", response_model=IntegrationResponse, status_code=201)
 async def add_integration(
     data: IntegrationCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(require_admin),
 ):
     """Add a new platform integration (admin only)."""
@@ -69,7 +69,7 @@ async def add_integration(
 @router.get("/{integration_id}", response_model=IntegrationResponse)
 async def get_integration(
     integration_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     result = await db.execute(
@@ -85,7 +85,7 @@ async def get_integration(
 async def update_integration(
     integration_id: uuid.UUID,
     data: IntegrationUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(require_admin),
 ):
     result = await db.execute(
@@ -114,7 +114,7 @@ async def update_integration(
 @router.delete("/{integration_id}")
 async def delete_integration(
     integration_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(require_admin),
 ):
     result = await db.execute(
@@ -130,10 +130,11 @@ async def delete_integration(
 @router.post("/{integration_id}/test", response_model=ConnectionTestResult)
 async def test_connection(
     integration_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    current_user: User = Depends(require_admin),
 ):
-    """Test connection to the configured platform."""
+    """Test connection to the configured platform (admin only: it makes an
+    outbound call with the stored credentials)."""
     result = await test_integration_connection(db, integration_id)
     return ConnectionTestResult(**result)
 
@@ -141,7 +142,7 @@ async def test_connection(
 @router.get("/{integration_id}/health")
 async def get_health(
     integration_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_active_user),
 ):
     result = await db.execute(

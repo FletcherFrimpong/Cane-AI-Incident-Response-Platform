@@ -1,11 +1,19 @@
 import { create } from 'zustand'
 
+export interface CurrentUser {
+  id: string
+  email: string
+  full_name: string
+  role: string
+  is_active: boolean
+}
+
 interface AuthState {
   accessToken: string | null
   refreshToken: string | null
-  user: any | null
+  user: CurrentUser | null
   setTokens: (access: string, refresh: string) => void
-  setUser: (user: any) => void
+  setUser: (user: CurrentUser | null) => void
   logout: () => void
 }
 
@@ -23,6 +31,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem('cane_access_token')
     localStorage.removeItem('cane_refresh_token')
     set({ accessToken: null, refreshToken: null, user: null })
-    window.location.href = '/login'
+    if (window.location.pathname !== '/login') window.location.href = '/login'
   },
 }))

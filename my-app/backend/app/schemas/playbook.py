@@ -19,6 +19,10 @@ class PlaybookUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class PlaybookAdvance(BaseModel):
+    decision: str | None = None
+
+
 class PlaybookStepCreate(BaseModel):
     step_order: int
     phase: PlaybookPhase
@@ -73,6 +77,7 @@ class PlaybookResponse(BaseModel):
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    steps_count: int = 0
 
     model_config = {"from_attributes": True}
 

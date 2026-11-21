@@ -3,28 +3,22 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
-      colors: {
-        brand: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          200: '#bfdbfe',
-          300: '#93c5fd',
-          400: '#60a5fa',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
-          800: '#1e40af',
-          900: '#1e3a8a',
-          950: '#172554',
-        },
-        severity: {
-          critical: '#dc2626',
-          high: '#ea580c',
-          medium: '#d97706',
-          low: '#2563eb',
-          info: '#6b7280',
-        },
+      fontFamily: {
+        sans: ['system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
       },
+      colors: {
+        // Help-desk style palette: deep teal rail, cool greys, one calm blue for actions
+        rail: { DEFAULT: '#0b3640', hover: '#14505c', active: '#1d6573' },
+        ink: { DEFAULT: '#2f3941', soft: '#49545c', muted: '#68737d', faint: '#87929d' },
+        line: { DEFAULT: '#d8dcde', soft: '#e9ebed' },
+        surface: { DEFAULT: '#f8f9f9', sunken: '#f3f4f5' },
+        brand: {
+          50: '#edf7ff', 100: '#cee2f2', 200: '#adcce4', 300: '#5293c7', 400: '#337fbd',
+          500: '#1f73b7', 600: '#1f73b7', 700: '#144a75', 800: '#0f3554', 900: '#0a2a43',
+        },
+        severity: { critical: '#cc3340', high: '#d2680d', medium: '#c28a00', low: '#1f73b7', info: '#87929d' },
+      },
+      fontSize: { '2xs': ['11px', '14px'] },
     },
   },
   plugins: [],

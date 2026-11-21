@@ -12,6 +12,9 @@ class DashboardOverview(BaseModel):
     mean_time_to_respond_minutes: float | None
     incidents_today: int
     incidents_this_week: int
+    assigned_to_me: int = 0
+    closed_this_week: int = 0
+    pending_actions: int = 0
 
 
 class ThreatDistribution(BaseModel):

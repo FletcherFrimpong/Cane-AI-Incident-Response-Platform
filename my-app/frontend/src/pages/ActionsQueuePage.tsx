@@ -1,209 +1,136 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { CheckCircle, XCircle, Clock, ListChecks } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, ListChecks, RefreshCw, X } from 'lucide-react'
 import { actionsApi } from '../api/actions'
-import { ACTION_STATUS_COLORS } from '../utils/constants'
-import { formatRelative } from '../utils/formatters'
+import { useAuthStore } from '../store/authStore'
+import { ActionPill, EmptyState, ErrorNote, Loading, Modal, Severity, ViewsSidebar, notify } from '../components/ui'
+import { ACTION_LABELS, ACTION_PARAM_KEYS, hasRole } from '../utils/constants'
+import { errorMessage, formatQueueTime, shortId } from '../utils/formatters'
+
+const VIEWS = [
+  { key: 'pending_approval', label: 'Awaiting approval' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'failed', label: 'Failed' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'all', label: 'All actions' },
+]
+const TITLES: Record<string, string> = {
+  pending_approval: 'Actions awaiting approval', completed: 'Completed actions', failed: 'Failed actions', rejected: 'Rejected actions', all: 'All actions',
+}
+const targetOf = (a: any) => String(a.action_params?.[ACTION_PARAM_KEYS[a.action_type]] ?? Object.values(a.action_params || {})[0] ?? '')
 
 export default function ActionsQueuePage() {
-  const queryClient = useQueryClient()
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [rejectReason, setRejectReason] = useState('')
-  const [tab, setTab] = useState<'pending' | 'history'>('pending')
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const canAct = hasRole(useAuthStore((s) => s.user)?.role, 'tier2_analyst')
+  const [view, setView] = useState('pending_approval')
+  const [rejecting, setRejecting] = useState<any | null>(null)
+  const [reason, setReason] = useState('')
 
-  const { data: pending, isLoading: pendingLoading } = useQuery({
-    queryKey: ['actions-pending'],
-    queryFn: () => actionsApi.pending().then((r) => r.data),
-    refetchInterval: 10000,
+  const history = useQuery({ queryKey: ['actions', 'history'], queryFn: () => actionsApi.history({ page_size: 200 }).then((r) => r.data as any[]), refetchInterval: 60_000 })
+  const all = history.data || []
+  const rows = view === 'all' ? all : all.filter((a) => a.status === view)
+  const count = (key: string) => (key === 'all' ? all.length : all.filter((a) => a.status === key).length)
+
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['actions'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['incident'] }) }
+  const approve = useMutation({
+    mutationFn: (id: string) => actionsApi.approve(id),
+    onSuccess: (res) => {
+      refresh()
+      res.data.status === 'completed'
+        ? notify.success(res.data.result?.dry_run ? 'Action simulated (dry run)' : 'Action executed')
+        : notify.error('Action failed', res.data.error_message)
+    },
+    onError: (e) => notify.error('Could not approve the action', errorMessage(e)),
   })
-
-  const { data: history, isLoading: historyLoading } = useQuery({
-    queryKey: ['actions-history'],
-    queryFn: () => actionsApi.history({ page_size: 50 }).then((r) => r.data),
-    enabled: tab === 'history',
-  })
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['actions-pending'] })
-    queryClient.invalidateQueries({ queryKey: ['actions-history'] })
-  }
-
-  const approveMutation = useMutation({
-    mutationFn: (actionId: string) => actionsApi.approve(actionId),
-    onSuccess: invalidate,
-  })
-
-  const rejectMutation = useMutation({
-    mutationFn: ({ actionId, reason }: { actionId: string; reason: string }) =>
-      actionsApi.reject(actionId, reason),
-    onSuccess: () => { invalidate(); setRejectingId(null); setRejectReason('') },
+  const reject = useMutation({
+    mutationFn: () => actionsApi.reject(rejecting.id, reason.trim()),
+    onSuccess: () => { refresh(); setRejecting(null); setReason('') },
+    onError: (e) => notify.error('Could not reject the action', errorMessage(e)),
   })
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">Action Queue</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {pending?.length || 0} actions awaiting approval
-          </p>
+    <div className="flex-1 flex min-w-0">
+      <ViewsSidebar
+        title="Action queue"
+        active={view}
+        onSelect={setView}
+        sections={[{ items: VIEWS.slice(0, 1).map((v) => ({ ...v, count: count(v.key) })) }, { items: VIEWS.slice(1).map((v) => ({ ...v, count: count(v.key), muted: true })) }]}
+        footer={<>Containment actions the AI proposes wait here until a tier 2 analyst or above approves them.</>}
+      />
+      <section className="flex-1 min-w-0 flex flex-col">
+        <div className="px-5 pt-5 pb-3 shrink-0 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-semibold">{TITLES[view]}</h1>
+            <div className="text-[13px] text-ink-muted mt-1">{rows.length} action{rows.length === 1 ? '' : 's'}</div>
+          </div>
+          <button className="btn-basic px-2" onClick={() => history.refetch()} title="Refresh" aria-label="Refresh"><RefreshCw className={`w-4 h-4 ${history.isFetching ? 'animate-spin' : ''}`} /></button>
         </div>
-      </div>
+        <div className="flex-1 min-h-0 overflow-auto border-t border-line">
+          {history.isLoading ? <Loading />
+            : history.isError ? <div className="p-5"><ErrorNote>Could not load actions.</ErrorNote></div>
+            : rows.length === 0
+              ? <EmptyState icon={<ListChecks className="w-8 h-8" />} title={view === 'pending_approval' ? 'Nothing is waiting for approval' : 'No actions here'}>
+                  {view === 'pending_approval' ? 'When AI triage recommends a containment action that needs a person, it appears here.' : 'Actions in this state will be listed here.'}
+                </EmptyState>
+              : (
+                <table className="table-queue min-w-[1080px]">
+                  <thead>
+                    <tr>
+                      <th className="w-24">Status</th>
+                      <th className="w-48">Action</th>
+                      <th className="w-[22%]">Target</th>
+                      <th>Incident</th>
+                      <th className="w-28">Severity</th>
+                      <th className="w-32">Requested by</th>
+                      <th className="w-36">Requested</th>
+                      <th className="w-44" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((a) => (
+                      <tr key={a.id} className="row" onClick={() => navigate(`/incidents/${a.incident_id}`)}>
+                        <td><ActionPill status={a.status} /></td>
+                        <td className="font-medium whitespace-nowrap">{ACTION_LABELS[a.action_type] || a.action_type}</td>
+                        <td className="max-w-0"><div className="truncate font-mono text-xs" title={targetOf(a)}>{targetOf(a)}</div></td>
+                        <td className="max-w-0">
+                          <div className="truncate" title={a.incident_title || ''}><span className="text-ink-muted">{shortId(a.incident_id)}</span> {a.incident_title}</div>
+                          {a.error_message && <div className="truncate text-xs text-[#8c232c]" title={a.error_message}>{a.error_message}</div>}
+                        </td>
+                        <td>{a.incident_severity ? <Severity value={a.incident_severity} /> : '-'}</td>
+                        <td className="text-ink-soft truncate">{a.source === 'ai_recommended' && a.requested_by === 'system' ? 'Cane AI' : a.requested_by.split('@')[0]}</td>
+                        <td className="text-ink-soft whitespace-nowrap">{formatQueueTime(a.created_at)}</td>
+                        <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          {a.status === 'pending_approval' && canAct && (
+                            <>
+                              <button className="btn-primary btn-sm mr-1.5" disabled={approve.isPending} onClick={() => approve.mutate(a.id)}><Check className="w-3.5 h-3.5" /> Approve</button>
+                              <button className="btn-basic btn-sm" onClick={() => setRejecting(a)}><X className="w-3.5 h-3.5" /> Reject</button>
+                            </>
+                          )}
+                          {a.status === 'completed' && a.result?.dry_run && <span className="tag">Dry run</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+        </div>
+      </section>
 
-      <div className="flex gap-2 mb-6">
-        <button
-          onClick={() => setTab('pending')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            tab === 'pending' ? 'bg-brand-600 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-          }`}
+      {rejecting && (
+        <Modal
+          title="Reject action"
+          onClose={() => setRejecting(null)}
+          footer={<>
+            <button className="btn-basic" onClick={() => setRejecting(null)}>Cancel</button>
+            <button className="btn-danger" disabled={!reason.trim() || reject.isPending} onClick={() => reject.mutate()}>Reject action</button>
+          </>}
         >
-          <span className="flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            Pending ({pending?.length || 0})
-          </span>
-        </button>
-        <button
-          onClick={() => setTab('history')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            tab === 'history' ? 'bg-brand-600 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <ListChecks className="h-4 w-4" />
-            History
-          </span>
-        </button>
-      </div>
-
-      {tab === 'pending' && (
-        pendingLoading ? (
-          <div className="text-gray-500">Loading...</div>
-        ) : !pending || pending.length === 0 ? (
-          <div className="card text-center py-12">
-            <CheckCircle className="h-12 w-12 text-green-300 mx-auto mb-3" />
-            <h3 className="text-lg font-medium text-gray-900 mb-1">All clear</h3>
-            <p className="text-gray-500 text-sm">No actions awaiting approval.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {pending.map((action: any) => (
-              <div key={action.id} className="card border-l-4 border-l-amber-400">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <span className="font-semibold capitalize">
-                      {action.action_type.replace(/_/g, ' ')}
-                    </span>
-                    {action.action_params && (
-                      <span className="text-sm text-gray-500 ml-2">
-                        {Object.entries(action.action_params).map(([k, v]) => `${k}: ${v}`).join(', ')}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-right text-sm text-gray-500">
-                    <div>{action.requested_by}</div>
-                    <div>{formatRelative(action.created_at)}</div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <Link
-                    to={`/incidents/${action.incident_id}`}
-                    className="text-sm text-brand-600 hover:text-brand-800 font-medium"
-                  >
-                    View Incident &rarr;
-                  </Link>
-                  {rejectingId === action.id ? (
-                    <div className="flex gap-2">
-                      <input
-                        className="input text-sm w-48"
-                        placeholder="Reason..."
-                        value={rejectReason}
-                        onChange={(e) => setRejectReason(e.target.value)}
-                      />
-                      <button
-                        className="btn-danger text-sm px-3"
-                        disabled={!rejectReason || rejectMutation.isPending}
-                        onClick={() => rejectMutation.mutate({ actionId: action.id, reason: rejectReason })}
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        className="btn-secondary text-sm px-3"
-                        onClick={() => { setRejectingId(null); setRejectReason('') }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <button
-                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
-                        disabled={approveMutation.isPending}
-                        onClick={() => approveMutation.mutate(action.id)}
-                      >
-                        <CheckCircle className="h-3.5 w-3.5" />
-                        Approve
-                      </button>
-                      <button
-                        className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
-                        onClick={() => setRejectingId(action.id)}
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        Reject
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      )}
-
-      {tab === 'history' && (
-        historyLoading ? (
-          <div className="text-gray-500">Loading...</div>
-        ) : !history || history.length === 0 ? (
-          <div className="card text-center py-12 text-gray-500">No action history yet.</div>
-        ) : (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-gray-500">
-                  <th className="pb-3 pr-4">Action</th>
-                  <th className="pb-3 pr-4">Status</th>
-                  <th className="pb-3 pr-4">Requested By</th>
-                  <th className="pb-3 pr-4">Time</th>
-                  <th className="pb-3">Incident</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {history.map((action: any) => (
-                  <tr key={action.id} className="hover:bg-gray-50">
-                    <td className="py-2 pr-4 font-medium capitalize">
-                      {action.action_type.replace(/_/g, ' ')}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <span className={`badge text-xs ${ACTION_STATUS_COLORS[action.status] || ''}`}>
-                        {action.status.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4">{action.requested_by}</td>
-                    <td className="py-2 pr-4 whitespace-nowrap">{formatRelative(action.created_at)}</td>
-                    <td className="py-2">
-                      <Link
-                        to={`/incidents/${action.incident_id}`}
-                        className="text-brand-600 hover:text-brand-800"
-                      >
-                        {action.incident_id.slice(0, 8)}
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
+          <div className="text-[13px] mb-3"><span className="font-semibold">{ACTION_LABELS[rejecting.action_type] || rejecting.action_type}</span> on <span className="font-mono text-xs">{targetOf(rejecting)}</span> will not run.</div>
+          <label className="label">Reason</label>
+          <textarea className="input" rows={3} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Recorded on the incident timeline" />
+        </Modal>
       )}
     </div>
   )

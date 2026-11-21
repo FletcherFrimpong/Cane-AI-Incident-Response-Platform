@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.models.incident import IncidentSeverity, IncidentStatus
 
 
@@ -33,9 +33,11 @@ class IncidentResponse(BaseModel):
     assigned_to: uuid.UUID | None
     playbook_id: uuid.UUID | None
     current_playbook_step: int | None
-    mitre_tactics: dict | None
-    mitre_techniques: dict | None
+    mitre_tactics: list[str] | None
+    mitre_techniques: list[str] | None
     source_entities: dict | None
+    enrichment: dict | None = None
+    external_refs: dict | None = None
     created_at: datetime
     updated_at: datetime
     resolved_at: datetime | None
@@ -62,8 +64,9 @@ class TimelineEntryResponse(BaseModel):
 
 
 class IncidentAssign(BaseModel):
-    user_id: uuid.UUID
+    user_id: uuid.UUID | None  # null unassigns
 
 
 class IncidentNote(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=5000)
+    false_positive: bool = False

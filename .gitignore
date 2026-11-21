@@ -34,3 +34,6 @@ Thumbs.db
 
 # Alembic
 alembic/versions/*.pyc
+
+# Celery beat state
+celerybeat-schedule*

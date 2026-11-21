@@ -2,18 +2,25 @@
 
 import logging
 from typing import Any
-from app.integrations.base_client import BaseIntegrationClient, OAuth2ClientCredentialsMixin
+from app.integrations.base_client import BaseIntegrationClient, OAuth2ClientCredentialsMixin, seg
+from app.integrations.graph_extras import GraphExtras
 
 logger = logging.getLogger("cane_ai.integrations.graph")
 
 
-class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
+class MicrosoftGraphClient(GraphExtras, BaseIntegrationClient, OAuth2ClientCredentialsMixin):
     platform_name = "microsoft_graph"
     display_name = "Microsoft Graph Security"
     description = "Manage users, security alerts, and identity via Microsoft Graph API"
     auth_type = "oauth2_client_credentials"
     required_credentials = ["tenant_id", "client_id", "client_secret"]
     optional_config = []
+    actions = {
+        "disable_account": "disable_user", "enable_account": "enable_user",
+        "revoke_sessions": "revoke_sessions", "force_password_reset": "force_password_reset",
+        "purge_email": "purge_email",
+    }
+    provides_context = ("user", "host")
     capabilities = [
         "disable_user",
         "enable_user",
@@ -59,7 +66,7 @@ class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.patch(
-            f"{self.BASE_URL}/users/{user_principal_name}",
+            f"{self.BASE_URL}/users/{seg(user_principal_name)}",
             headers=headers,
             json={"accountEnabled": False},
         )
@@ -75,7 +82,7 @@ class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.patch(
-            f"{self.BASE_URL}/users/{user_principal_name}",
+            f"{self.BASE_URL}/users/{seg(user_principal_name)}",
             headers=headers,
             json={"accountEnabled": True},
         )
@@ -91,7 +98,7 @@ class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.post(
-            f"{self.BASE_URL}/users/{user_principal_name}/revokeSignInSessions",
+            f"{self.BASE_URL}/users/{seg(user_principal_name)}/revokeSignInSessions",
             headers=headers,
         )
         response.raise_for_status()
@@ -107,7 +114,7 @@ class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
         client = await self.get_http_client()
         # Set forceChangePasswordNextSignIn
         response = await client.patch(
-            f"{self.BASE_URL}/users/{user_principal_name}",
+            f"{self.BASE_URL}/users/{seg(user_principal_name)}",
             headers=headers,
             json={"passwordProfile": {"forceChangePasswordNextSignIn": True}},
         )
@@ -135,7 +142,7 @@ class MicrosoftGraphClient(BaseIntegrationClient, OAuth2ClientCredentialsMixin):
         headers = await self._auth_headers()
         client = await self.get_http_client()
         response = await client.patch(
-            f"{self.BASE_URL}/security/alerts_v2/{alert_id}",
+            f"{self.BASE_URL}/security/alerts_v2/{seg(alert_id)}",
             headers=headers,
             json=updates,
         )

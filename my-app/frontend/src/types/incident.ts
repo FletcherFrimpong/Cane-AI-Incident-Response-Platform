@@ -24,6 +24,6 @@ export interface TimelineEntry {
   event_type: string
   actor: string
   description: string
-  metadata: Record<string, any> | null
+  extra_data: Record<string, any> | null
   timestamp: string
 }

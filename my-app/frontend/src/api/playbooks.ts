@@ -30,4 +30,7 @@ export const playbooksApi = {
 
   execute: (playbookId: string, incidentId: string) =>
     api.post(`/playbooks/${playbookId}/execute/${incidentId}`),
+
+  advance: (incidentId: string, decision?: string) =>
+    api.post(`/playbooks/advance/${incidentId}`, { decision: decision || null }),
 }

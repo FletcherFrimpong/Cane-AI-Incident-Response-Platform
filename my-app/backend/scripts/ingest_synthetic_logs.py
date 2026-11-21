@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import async_session_factory
 from app.services.log_ingestion import ingest_batch
+from app.workers.dispatch import queue_auto_triage
 
 
 SYNTHETIC_LOGS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "synthetic_logs"
@@ -29,6 +30,7 @@ async def ingest_file(filepath: Path):
     async with async_session_factory() as session:
         result = await ingest_batch(session, events)
         await session.commit()
+    await queue_auto_triage(result["incident_ids_created"])
 
     ingested = result.get("ingested", 0)
     errors = result.get("errors", 0)

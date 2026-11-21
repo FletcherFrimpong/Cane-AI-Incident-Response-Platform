@@ -24,6 +24,10 @@ class UserRoleUpdate(BaseModel):
     role: UserRole
 
 
+class UserActiveUpdate(BaseModel):
+    is_active: bool
+
+
 class ApiKeyCreate(BaseModel):
     provider: LLMProvider
     api_key: str

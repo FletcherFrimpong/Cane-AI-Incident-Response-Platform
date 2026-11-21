@@ -23,6 +23,10 @@ celery_app.conf.update(
             "task": "app.workers.health_checks.check_integration_health",
             "schedule": 300.0,  # every 5 minutes
         },
+        "poll-log-sources": {
+            "task": "app.workers.source_tasks.poll_sources",
+            "schedule": float(settings.source_poll_seconds),
+        },
     },
     task_routes={
         "app.workers.triage_tasks.*": {"queue": "triage"},
@@ -32,4 +36,8 @@ celery_app.conf.update(
 celery_app.autodiscover_tasks(["app.workers"])
 
 # Explicit imports for task registration
-import app.workers.triage_tasks  # noqa: F401
+import app.workers.triage_tasks  # noqa: F401, E402
+import app.workers.health_checks  # noqa: F401, E402
+import app.workers.followup_tasks  # noqa: F401, E402
+import app.workers.source_tasks  # noqa: F401, E402
+import app.services.events  # noqa: F401, E402 - registers the change-feed listeners in workers too

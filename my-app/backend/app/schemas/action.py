@@ -31,5 +31,7 @@ class ActionLogResponse(BaseModel):
     result: dict | None
     error_message: str | None
     created_at: datetime
+    incident_title: str | None = None
+    incident_severity: str | None = None
 
     model_config = {"from_attributes": True}

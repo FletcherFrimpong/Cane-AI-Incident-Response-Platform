@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
@@ -30,6 +30,12 @@ class IncidentStatus(str, enum.Enum):
 
 class Incident(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "incidents"
+    __table_args__ = (
+        # One incident per correlation ID, enforced by the database: two batches
+        # arriving at the same moment cannot both open one.
+        Index("uq_incidents_correlation_id", "correlation_id", unique=True,
+              postgresql_where=text("correlation_id IS NOT NULL")),
+    )
 
     tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -42,7 +48,7 @@ class Incident(Base, UUIDMixin, TimestampMixin):
     )
     attack_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    correlation_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -53,6 +59,10 @@ class Incident(Base, UUIDMixin, TimestampMixin):
     mitre_tactics: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     mitre_techniques: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     source_entities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Threat-intel and context lookups for this incident's entities (see enrichment_service)
+    enrichment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Tickets opened in external systems: {"jira": {"ticket_id": ..., "ticket_url": ...}, ...}
+    external_refs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     assigned_user: Mapped["User | None"] = relationship(back_populates="assigned_incidents", foreign_keys=[assigned_to])

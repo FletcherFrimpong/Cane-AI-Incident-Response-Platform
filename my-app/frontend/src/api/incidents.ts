@@ -4,6 +4,10 @@ export const incidentsApi = {
   list: (params?: Record<string, any>) =>
     api.get('/incidents/', { params }),
 
+  views: () => api.get('/incidents/views'),
+
+  enrich: (id: string) => api.post(`/incidents/${id}/enrich`),
+
   get: (id: string) =>
     api.get(`/incidents/${id}`),
 
@@ -13,14 +17,14 @@ export const incidentsApi = {
   update: (id: string, data: any) =>
     api.put(`/incidents/${id}`, data),
 
-  assign: (id: string, userId: string) =>
+  assign: (id: string, userId: string | null) =>
     api.put(`/incidents/${id}/assign`, { user_id: userId }),
 
   escalate: (id: string) =>
     api.put(`/incidents/${id}/escalate`),
 
-  close: (id: string, content: string) =>
-    api.put(`/incidents/${id}/close`, { content }),
+  close: (id: string, content: string, falsePositive = false) =>
+    api.put(`/incidents/${id}/close`, { content, false_positive: falsePositive }),
 
   getTimeline: (id: string) =>
     api.get(`/incidents/${id}/timeline`),

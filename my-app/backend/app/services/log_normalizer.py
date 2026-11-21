@@ -4,17 +4,31 @@ Each normalizer extracts common fields from schema-specific structures
 into the flat LogEvent columns while preserving raw data in JSONB.
 """
 
-from datetime import datetime
+import ipaddress
+from datetime import datetime, timezone
 from typing import Any
 from dateutil import parser as date_parser
 
 
 def _parse_timestamp(value: Any) -> datetime:
+    """Parse an event timestamp to an aware UTC datetime.
+
+    A missing timestamp falls back to now; a present but unparseable one raises
+    ValueError so the caller can reject that event instead of storing a wrong time."""
+    if value is None or value == "":
+        return datetime.now(timezone.utc)
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        return date_parser.isoparse(value)
-    return datetime.utcnow()
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = date_parser.isoparse(value)
+        except (ValueError, OverflowError):
+            raise ValueError(f"Invalid timestamp: {value[:60]!r}")
+    else:
+        raise ValueError(f"Invalid timestamp type: {type(value).__name__}")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _extract_severity(data: dict, default: str = "info") -> str:
@@ -44,15 +58,22 @@ def _extract_severity(data: dict, default: str = "info") -> str:
 
 
 def _safe_ip(value: Any) -> str | None:
-    if not value or str(value).strip() in ("", "-", "N/A", "null", "none"):
+    """Return a valid IPv4/IPv6 address string, or None. Tolerates an `ip:port` suffix."""
+    if not value:
         return None
-    ip = str(value).strip()
-    # Basic validation - just check it looks like an IP
-    parts = ip.split(".")
-    if len(parts) == 4:
-        return ip
-    if ":" in ip:  # IPv6
-        return ip
+    text = str(value).strip()
+    if text.lower() in ("", "-", "n/a", "null", "none"):
+        return None
+    candidates = [text]
+    if text.count(":") == 1:  # 1.2.3.4:443
+        candidates.append(text.split(":")[0])
+    if text.startswith("[") and "]" in text:  # [2001:db8::1]:443
+        candidates.append(text[1:text.index("]")])
+    for candidate in candidates:
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            continue
     return None
 
 
@@ -446,34 +467,69 @@ TYPE_TO_SCHEMA: dict[str, str] = {
 }
 
 
+def _clip(value: Any, limit: int) -> str | None:
+    if value is None:
+        return None
+    return str(value)[:limit]
+
+
+def _finalize(normalized: dict) -> dict:
+    """Make a normalized event safe to store: every column fits and has the right type."""
+    severity = str(normalized.get("severity") or "info").lower()
+    correlation_id = normalized.get("correlation_id")
+    return {
+        **normalized,
+        "tenant_id": _clip(normalized.get("tenant_id") or "unknown", 100),
+        "source_system": _clip(normalized.get("source_system") or "unknown", 255),
+        "log_type": _clip(normalized.get("log_type") or "unknown", 50),
+        "schema_id": _clip(normalized.get("schema_id") or "unknown", 50),
+        "correlation_id": _clip(correlation_id, 255) if correlation_id not in (None, "") else None,
+        "severity": severity if severity in ("critical", "high", "medium", "low", "info") else "info",
+        "summary": _clip(normalized.get("summary"), 2000),
+        "source_ip": _safe_ip(normalized.get("source_ip")),
+        "destination_ip": _safe_ip(normalized.get("destination_ip")),
+        "user_identity": _clip(normalized.get("user_identity"), 255),
+        "host": _clip(normalized.get("host"), 255),
+    }
+
+
 def normalize_log_event(schema_id: str, data: dict) -> dict:
-    """Normalize a log event using the appropriate normalizer."""
-    key = schema_id.lower().strip()
+    """Normalize a log event using the appropriate normalizer.
+
+    Raises ValueError for input that cannot be turned into a storable event."""
+    if not isinstance(data, dict):
+        raise ValueError("Event data must be a JSON object")
+    key = str(schema_id or "").lower().strip()
     if key not in NORMALIZERS:
         # Try the Type field in data
-        type_field = data.get("Type", "")
-        mapped = TYPE_TO_SCHEMA.get(type_field, "")
+        mapped = TYPE_TO_SCHEMA.get(str(data.get("Type", "")), "")
         if mapped in NORMALIZERS:
             key = mapped
         else:
-            # Fallback: return a generic normalized event
-            return {
+            # Fallback: keep the event as a generic record rather than dropping it
+            label = key or "unknown"
+            return _finalize({
                 "tenant_id": data.get("TenantId", "unknown"),
                 "time_generated": _parse_timestamp(data.get("TimeGenerated")),
                 "source_system": data.get("SourceSystem", "unknown"),
-                "log_type": schema_id,
-                "schema_id": schema_id,
+                "log_type": label,
+                "schema_id": label,
                 "correlation_id": data.get("CorrelationId"),
                 "severity": _extract_severity(data, "info"),
-                "summary": f"Unknown log type: {schema_id}",
+                "summary": f"Unknown log type: {label[:50]}",
                 "source_ip": None,
                 "destination_ip": None,
                 "user_identity": None,
                 "host": data.get("Computer"),
                 "raw_data": data,
-            }
+            })
 
-    return NORMALIZERS[key](data)
+    try:
+        return _finalize(NORMALIZERS[key](data))
+    except ValueError:
+        raise
+    except (TypeError, AttributeError, KeyError) as e:
+        raise ValueError(f"Malformed {key} event: {e}")
 
 
 def get_supported_schemas() -> list[str]:

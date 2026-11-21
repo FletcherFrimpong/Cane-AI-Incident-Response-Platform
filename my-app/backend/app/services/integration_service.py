@@ -83,13 +83,67 @@ async def get_integration_client_by_platform(
             PlatformIntegration.platform == platform,
             PlatformIntegration.tenant_id == tenant_id,
             PlatformIntegration.is_active == True,
-        )
+        ).order_by(PlatformIntegration.created_at.desc()).limit(1)
     )
-    integration = result.scalar_one_or_none()
+    integration = result.scalars().first()
     if not integration:
         raise NotFoundError(f"No active {platform} integration configured")
 
     return _build_client(integration)
+
+
+async def active_clients(
+    db: AsyncSession,
+    *,
+    action: str | None = None,
+    enriches: str | None = None,
+    context: str | None = None,
+    category: str | None = None,
+) -> list[BaseIntegrationClient]:
+    """Clients for every active integration with the requested ability.
+
+    action    a response action type the connector can execute (e.g. "block_ip")
+    enriches  an IOC kind it can look up ("ip", "domain", "url", "file_hash")
+    context   an entity kind it can describe ("user", "host")
+    category  "notification", "ticketing", "source", ...
+
+    Each client carries `.integration_id` and `.integration_name`. The caller closes them.
+    An integration whose credentials cannot be decrypted is skipped, not fatal."""
+    result = await db.execute(
+        select(PlatformIntegration)
+        .where(PlatformIntegration.is_active == True)
+        .order_by(PlatformIntegration.created_at.asc())
+    )
+    clients: list[BaseIntegrationClient] = []
+    for integration in result.scalars().all():
+        cls = get_integration_class(integration.platform)
+        if cls is None:
+            continue
+        if action is not None and action not in cls.actions:
+            continue
+        if enriches is not None and enriches not in cls.enriches:
+            continue
+        if context is not None and context not in cls.provides_context:
+            continue
+        if category is not None and cls.category != category:
+            continue
+        try:
+            client = _build_client(integration)
+        except Exception as e:  # noqa: BLE001 - bad key / corrupt credentials
+            logger.error("Cannot build client for integration %s: %s", integration.display_name, e)
+            continue
+        client.integration_id = integration.id
+        client.integration_name = integration.display_name
+        clients.append(client)
+    return clients
+
+
+async def close_clients(clients: list[BaseIntegrationClient]) -> None:
+    for client in clients:
+        try:
+            await client.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _build_client(integration: PlatformIntegration) -> BaseIntegrationClient:
@@ -142,7 +196,10 @@ async def check_all_integration_health(db: AsyncSession):
         try:
             client = _build_client(integration)
             health = await client.get_health()
-            integration.health_status = HealthStatus(health.get("status", "unknown"))
+            try:
+                integration.health_status = HealthStatus(health.get("status", "unknown"))
+            except ValueError:
+                integration.health_status = HealthStatus.UNKNOWN
             integration.last_health_check = datetime.now(timezone.utc)
             await client.close()
         except Exception as e:
@@ -151,3 +208,4 @@ async def check_all_integration_health(db: AsyncSession):
             logger.error("Health check failed for %s: %s", integration.display_name, e)
 
     await db.flush()
+    return len(integrations)
