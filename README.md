@@ -49,39 +49,14 @@ The screenshots use the sample scenarios in `enhanced_synthetic_logs/`. The AI a
 
 ## Architecture
 
-```
-  Log senders                       Analysts
-  Sentinel webhook, file upload,    Browser: React + TypeScript + Tailwind
-  batch API, polled sources         (REST, plus a server-sent event stream
-  (Splunk, Elastic, GuardDuty)       for live updates)
-          |                                   |
-          v                                   v
-  +---------------------------------------------------------------+
-  |                        FastAPI backend                        |
-  |                                                               |
-  |  Ingestion        normalise 14 log types, correlate by        |
-  |                   CorrelationId, open incidents               |
-  |  Triage           enrich -> LLM -> validate -> guard          |
-  |  Actions          approval queue, fan-out to connected tools  |
-  |  Playbooks        NIST 800-61 steps, automated proposals      |
-  |  Integrations     27 connectors, encrypted credentials        |
-  +-------+----------------------+------------------------+-------+
-          |                      |                        |
-          v                      v                        v
-  +---------------+   +---------------------+   +------------------+
-  |  PostgreSQL   |   |  Redis              |   |  Celery workers  |
-  |  incidents,   |   |  task broker and    |   |  auto-triage,    |
-  |  log events,  |   |  live-update        |   |  notifications,  |
-  |  actions,     |   |  pub/sub            |   |  ticket sync,    |
-  |  playbooks,   |   +---------------------+   |  source polling, |
-  |  timeline     |                             |  health checks   |
-  +---------------+                             +--------+---------+
-                                                         |
-                                                         v
-                         Outside systems, through connectors:
-                         EDR and firewalls, identity, threat intelligence,
-                         chat and paging, ticketing, LLM provider
-```
+![Cane AI architecture: log sources and analysts at the top, the six-step backend pipeline in the middle, PostgreSQL, Redis and Celery workers beneath it, and the outside tools reached through connectors at the bottom](docs/architecture.svg)
+
+How to read it:
+
+- **Top.** Events arrive by webhook, upload or batch, or are pulled from Splunk, Elastic and GuardDuty. Analysts use the browser app, which talks to the API and listens on a live update stream.
+- **Middle.** One pipeline turns a raw event into a handled incident: ingest, correlate, enrich, AI triage, guard, act. The guard (step 5) is the safety boundary: nothing the model says reaches a real system without passing it.
+- **Beneath.** PostgreSQL holds the data. Redis carries background jobs and live updates. Celery workers do the slow work: triage, notifications, ticket sync, polling sources, health checks.
+- **Bottom.** Everything outside the platform is reached through a connector, and every new connector starts in dry-run.
 
 ### Automated TDIR Pipeline
 

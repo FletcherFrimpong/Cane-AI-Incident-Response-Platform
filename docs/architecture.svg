@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 830" width="1200" height="830" role="img" aria-labelledby="t d" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+<title id="t">Cane AI architecture</title>
+<desc id="d">Log sources feed a FastAPI backend that ingests, correlates, enriches, triages with an LLM, guards the result and acts. PostgreSQL, Redis and Celery workers sit beneath it, and 27 connectors reach outside tools. Analysts use a browser app with REST and a live update stream.</desc>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#68737d"/></marker>
+<marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#1f73b7"/></marker>
+</defs>
+<rect width="1200" height="830" rx="14" fill="#ffffff"/>
+<rect x="40" y="34" width="400" height="92" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="60" y="60" font-size="11" fill="#68737d" font-weight="700" text-anchor="start" letter-spacing="0.08em">LOG AND ALERT SOURCES</text>
+<text x="60" y="84" font-size="13.5" fill="#2f3941" font-weight="600" text-anchor="start">Sentinel webhook · file upload · batch API</text>
+<text x="60" y="106" font-size="13" fill="#68737d" font-weight="400" text-anchor="start">Polled every minute: Splunk, Elastic, AWS GuardDuty</text>
+<rect x="760" y="34" width="400" height="92" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="780" y="60" font-size="11" fill="#68737d" font-weight="700" text-anchor="start" letter-spacing="0.08em">ANALYSTS</text>
+<text x="780" y="84" font-size="13.5" fill="#2f3941" font-weight="600" text-anchor="start">Browser app: React, TypeScript, Tailwind</text>
+<text x="780" y="106" font-size="13" fill="#68737d" font-weight="400" text-anchor="start">REST API, plus a live update stream</text>
+<rect x="40" y="176" width="1120" height="300" rx="14" fill="#f8f9f9" stroke="#d8dcde" stroke-width="1.25"/>
+<rect x="40" y="176" width="1120" height="44" rx="14" fill="#0b3640"/><rect x="40" y="200" width="1120" height="20" fill="#0b3640"/>
+<text x="62" y="204" font-size="15" fill="#ffffff" font-weight="700" text-anchor="start">FastAPI backend</text>
+<text x="1138" y="204" font-size="12.5" fill="#b9d4d9" font-weight="400" text-anchor="end">one pipeline, from raw event to contained incident</text>
+<rect x="62.0" y="244" width="164" height="152" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<circle cx="86.0" cy="272" r="12" fill="#1f73b7"/>
+<text x="86.0" y="276.5" font-size="12.5" fill="#ffffff" font-weight="700" text-anchor="middle">1</text>
+<text x="106.0" y="277" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Ingest</text>
+<text x="78.0" y="310" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Normalise 14 log</text>
+<text x="78.0" y="329" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">types into one</text>
+<text x="78.0" y="348" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">event shape</text>
+<path d="M228.0 320.0 L242.4 320.0" fill="none" stroke="#1f73b7" stroke-width="1.6" marker-end="url(#ab)"/>
+<rect x="244.4" y="244" width="164" height="152" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<circle cx="268.4" cy="272" r="12" fill="#1f73b7"/>
+<text x="268.4" y="276.5" font-size="12.5" fill="#ffffff" font-weight="700" text-anchor="middle">2</text>
+<text x="288.4" y="277" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Correlate</text>
+<text x="260.4" y="310" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Group related events;</text>
+<text x="260.4" y="329" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">open an incident only</text>
+<text x="260.4" y="348" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">when it is warranted</text>
+<path d="M410.4 320.0 L424.79999999999995 320.0" fill="none" stroke="#1f73b7" stroke-width="1.6" marker-end="url(#ab)"/>
+<rect x="426.8" y="244" width="164" height="152" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<circle cx="450.8" cy="272" r="12" fill="#1f73b7"/>
+<text x="450.8" y="276.5" font-size="12.5" fill="#ffffff" font-weight="700" text-anchor="middle">3</text>
+<text x="470.8" y="277" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Enrich</text>
+<text x="442.8" y="310" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Threat intel on</text>
+<text x="442.8" y="329" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">indicators; who the</text>
+<text x="442.8" y="348" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">user and host are</text>
+<path d="M592.8 320.0 L607.1999999999999 320.0" fill="none" stroke="#1f73b7" stroke-width="1.6" marker-end="url(#ab)"/>
+<rect x="609.2" y="244" width="164" height="152" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<circle cx="633.2" cy="272" r="12" fill="#1f73b7"/>
+<text x="633.2" y="276.5" font-size="12.5" fill="#ffffff" font-weight="700" text-anchor="middle">4</text>
+<text x="653.2" y="277" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">AI triage</text>
+<text x="625.2" y="310" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Severity, attack type,</text>
+<text x="625.2" y="329" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">MITRE mapping,</text>
+<text x="625.2" y="348" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">recommended actions</text>
+<path d="M775.2 320.0 L789.6 320.0" fill="none" stroke="#1f73b7" stroke-width="1.6" marker-end="url(#ab)"/>
+<rect x="791.6" y="244" width="164" height="152" rx="10" fill="#eef7f9" stroke="#0b3640" stroke-width="2"/>
+<circle cx="815.6" cy="272" r="12" fill="#0b3640"/>
+<text x="815.6" y="276.5" font-size="12.5" fill="#ffffff" font-weight="700" text-anchor="middle">5</text>
+<text x="835.6" y="277" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Guard</text>
+<text x="807.6" y="310" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Validate the reply;</text>
+<text x="807.6" y="329" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">targets must be in</text>
+<text x="807.6" y="348" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">the evidence</text>
+<path d="M957.6 320.0 L972.0 320.0" fill="none" stroke="#1f73b7" stroke-width="1.6" marker-end="url(#ab)"/>
+<rect x="974.0" y="244" width="164" height="152" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<circle cx="998.0" cy="272" r="12" fill="#1f73b7"/>
+<text x="998.0" y="276.5" font-size="12.5" fill="#ffffff" font-weight="700" text-anchor="middle">6</text>
+<text x="1018.0" y="277" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Act</text>
+<text x="990.0" y="310" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Allow-listed blocks</text>
+<text x="990.0" y="329" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">run; the rest waits</text>
+<text x="990.0" y="348" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">for an analyst</text>
+<text x="600" y="432" font-size="13" fill="#2f3941" font-weight="400" text-anchor="middle">Every step is written to the incident timeline, which drives live updates, notifications and ticket sync.</text>
+<text x="600" y="454" font-size="13" fill="#68737d" font-weight="400" text-anchor="middle">Playbooks (NIST 800-61) guide the analyst and propose their automated steps through the same approval queue.</text>
+<path d="M240 126 L240 174" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M960 126 L960 174" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+<rect x="40" y="526" width="360" height="96" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="60" y="556" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">PostgreSQL</text>
+<text x="60" y="580" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Incidents, log events, actions,</text>
+<text x="60" y="599" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">playbooks, timeline. Alembic migrations.</text>
+<rect x="420" y="526" width="360" height="96" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="440" y="556" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Redis</text>
+<text x="440" y="580" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Task broker for Celery, and</text>
+<text x="440" y="599" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">pub/sub for the live update stream.</text>
+<rect x="800" y="526" width="360" height="96" rx="10" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="820" y="556" font-size="15" fill="#2f3941" font-weight="700" text-anchor="start">Celery workers</text>
+<text x="820" y="580" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">Auto-triage, notifications, ticket sync,</text>
+<text x="820" y="599" font-size="12.5" fill="#68737d" font-weight="400" text-anchor="start">source polling, health checks.</text>
+<path d="M220 476 L220 524" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+<path d="M600 476 L600 524" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+<path d="M980 476 L980 524" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M782 574 L798 574" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="40" y="672" width="1120" height="128" rx="14" fill="#f8f9f9" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="60" y="698" font-size="11" fill="#68737d" font-weight="700" text-anchor="start" letter-spacing="0.08em">OUTSIDE TOOLS, REACHED THROUGH 27 CONNECTORS (NEW ONES START IN DRY-RUN)</text>
+<rect x="62.0" y="712" width="172" height="74" rx="8" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="74.0" y="733" font-size="13" fill="#2f3941" font-weight="700" text-anchor="start">Response</text>
+<text x="74.0" y="753" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Defender, CrowdStrike,</text>
+<text x="74.0" y="769" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">SentinelOne, Okta, firewalls</text>
+<rect x="245.6" y="712" width="172" height="74" rx="8" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="257.6" y="733" font-size="13" fill="#2f3941" font-weight="700" text-anchor="start">Threat intelligence</text>
+<text x="257.6" y="753" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">VirusTotal, GreyNoise,</text>
+<text x="257.6" y="769" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">urlscan, MISP, OpenCTI</text>
+<rect x="429.2" y="712" width="172" height="74" rx="8" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="441.2" y="733" font-size="13" fill="#2f3941" font-weight="700" text-anchor="start">Identity and devices</text>
+<text x="441.2" y="753" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Entra ID, Intune,</text>
+<text x="441.2" y="769" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Okta</text>
+<rect x="612.8" y="712" width="172" height="74" rx="8" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="624.8" y="733" font-size="13" fill="#2f3941" font-weight="700" text-anchor="start">Notify and page</text>
+<text x="624.8" y="753" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Slack, Teams,</text>
+<text x="624.8" y="769" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">PagerDuty, Opsgenie</text>
+<rect x="796.4" y="712" width="172" height="74" rx="8" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="808.4" y="733" font-size="13" fill="#2f3941" font-weight="700" text-anchor="start">Ticketing</text>
+<text x="808.4" y="753" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Jira,</text>
+<text x="808.4" y="769" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">ServiceNow</text>
+<rect x="980.0" y="712" width="172" height="74" rx="8" fill="#ffffff" stroke="#d8dcde" stroke-width="1.25"/>
+<text x="992.0" y="733" font-size="13" fill="#2f3941" font-weight="700" text-anchor="start">LLM provider</text>
+<text x="992.0" y="753" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Claude, OpenAI,</text>
+<text x="992.0" y="769" font-size="11.5" fill="#68737d" font-weight="400" text-anchor="start">Azure OpenAI</text>
+<path d="M980 622 L980 670" fill="none" stroke="#68737d" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+<text x="996" y="651" font-size="12" fill="#68737d" font-weight="400" text-anchor="start">actions, lookups, alerts</text>
+</svg>
