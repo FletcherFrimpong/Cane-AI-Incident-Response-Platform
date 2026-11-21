@@ -60,115 +60,22 @@ How to read it:
 
 ### Automated TDIR Pipeline
 
-The platform implements an automated Threat Detection, Investigation, and Response (TDIR) pipeline following NIST 800-61. Ingestion through triage runs without a person; containment is automatic only for a short allow-list of low-blast-radius actions, and everything else waits for an analyst.
+Threat detection, investigation and response (TDIR), following NIST SP 800-61. Everything up to and including triage runs without a person. Containment is automatic only for a short allow-list of low-risk blocks; everything else waits for an analyst.
 
-```
-1. DETECTION & INGESTION
-   Sentinel Webhook / File Upload / Batch API
-           |
-           v
-   Log Normalizer (14 ASIM schema types)
-           |
-           v
-   Correlation Engine (group by CorrelationId)
-           |
-           +---> Existing incident? Link event, raise severity if needed
-           +---> Group reaches medium severity / has an alert /
-           |     matches an attack pattern? Create incident
-           +---> Otherwise keep as logs (linked later if it escalates)
-           |
-           v
-   Store in PostgreSQL (log_events table, JSONB raw data)
+![Pipeline: five automatic stages ending in the guard, which sends each recommended action to the approval queue, to automatic execution, or drops it; an analyst then decides, connected tools act, the playbook moves on and the incident is closed](docs/pipeline.svg)
 
-2. AUTO-ENRICHMENT (Celery background task)
-   Incident created
-           |
-           v
-   Extract IOCs from log events:
-   - Public IPs (filter out RFC-1918 private ranges)
-   - File hashes (SHA256/SHA1/MD5 from raw data)
-   - Domains and URLs
-           |
-           v
-   Query Threat Intelligence (if configured):
-   - VirusTotal: IP/hash/domain/URL reputation, malicious counts
-   - AbuseIPDB: IP abuse confidence score, report count
-           |
-           v
-   Enrichment results fed into AI prompt
-   (Graceful skip if integrations not configured)
+| Stage | What happens | Where a person comes in |
+|-------|--------------|-------------------------|
+| **1. Ingest** | Events arrive by Sentinel webhook, file upload or batch API, or are pulled every minute from Splunk, Elastic and GuardDuty. Each of the 14 log types is normalised into one event shape. A malformed event is rejected on its own; the rest of the batch still goes in. | Nobody |
+| **2. Correlate** | Events sharing a correlation ID are grouped. A group becomes an incident when its worst event reaches medium severity, a security product raised an alert, or a known attack pattern is recognised. Quieter events stay as logs and are pulled in if the group escalates later. | Nobody |
+| **3. Enrich** | IPs, domains, URLs and file hashes are checked against every connected threat-intelligence source, and the accounts and hosts involved are looked up in the directory and endpoint tools. Results are stored on the incident. Skipped quietly when nothing is connected. | Nobody |
+| **4. AI triage** | The model receives the evidence and the enrichment and returns severity, attack type, MITRE ATT&CK mapping, kill-chain phase, confidence, recommended actions and whether a person should look. A matching playbook is attached. | An analyst can re-run triage from the incident page |
+| **5. Guard** | The reply is validated; a malformed one is recorded as a failed triage and the incident goes to an analyst. Each recommended action is then sent to one of three outcomes (see the diagram and [How auto-containment is gated](#how-auto-containment-is-gated)). | Nobody. This is what stands between the model and real systems |
+| **6. Act** | Queued actions wait on the incident page and in the action queue. An approved action goes to every connected tool that supports it, and each tool's result is recorded. | A tier 2 analyst or above approves or rejects, in the app or from Slack |
+| **7. Playbook** | The attached NIST 800-61 playbook walks through detection and analysis, containment, eradication, recovery and post-incident review. Automated steps propose their action for each matching host, address or account, through the same approval queue, and the playbook advances when they finish. | The analyst makes the decisions and completes the manual steps |
+| **8. Close** | The closing note is recorded, the ticket in Jira or ServiceNow is closed and the page in PagerDuty or Opsgenie is resolved. | The analyst closes the incident, as resolved or as a false positive |
 
-3. AI TRIAGE
-   Enriched events + incident context
-           |
-           v
-   System LLM API key (CANE_AUTO_TRIAGE_API_KEY)
-           |
-           v
-   Claude / OpenAI / Azure OpenAI
-           |
-           v
-   Structured JSON response, strictly validated
-   (wrong shape or confidence outside 0-1 = failed triage,
-    incident goes to an analyst):
-   - Severity classification (critical/high/medium/low/info)
-   - Attack type identification
-   - MITRE ATT&CK mapping (tactics + technique IDs)
-   - Kill chain phase
-   - Confidence score (0.0 - 1.0)
-   - IOCs extracted (IPs, domains, hashes, emails)
-   - Recommended actions with priority and auto-execute flag
-   - Playbook suggestion
-   - Human review determination
-           |
-           v
-   Update incident + Store AI analysis + Match playbook
-
-4. CONTAINMENT (guarded)
-   For each AI-recommended action, the guard decides:
-           |
-           +-- Not an allowed action type, or its target does not
-           |   appear in the incident's own events?  --> dropped (and recorded)
-           |
-           +-- Allow-listed type (block IP / URL / file hash)
-           |   AND model flagged it auto-executable
-           |   AND model did not ask for human review
-           |   AND confidence >= 0.95
-           |   AND triage was automatic (not analyst-triggered)
-           |        --> executed via Microsoft Defender
-           |
-           +-- Everything else (isolate host, disable account,
-               revoke sessions, ...)  --> Action Queue, awaiting approval
-           |
-           v
-   Each action is committed before and after the external call,
-   and written to the incident timeline
-
-5. ANALYST REVIEW (only when needed)
-   Incident Detail page shows:
-   - AI analysis summary with confidence
-   - MITRE ATT&CK mapping
-   - Extracted IOCs with threat intel scores
-   - Pending actions with Approve / Reject buttons
-           |
-           v
-   On Approve: Execute via integration APIs
-   On Reject: Log reason, continue to next action
-
-6. PLAYBOOK EXECUTION
-   Playbook attached to incident (AI-recommended or manual)
-           |
-           v
-   Step-by-step execution:
-   - AUTOMATED steps -> Execute via integrations (may require approval)
-   - HUMAN_DECISION steps -> Present options to analyst
-   - HUMAN_ACTION steps -> Analyst performs and marks complete
-   - INFO steps -> Display guidance (NIST 800-61 references)
-           |
-           v
-   Advance through NIST phases:
-   Detection & Analysis -> Containment -> Eradication -> Recovery -> Post-Incident
-```
+Every stage writes to the incident's timeline. That timeline is what drives live updates in the browser, notifications and ticket sync, so nothing the platform does to an incident goes unrecorded or unannounced.
 
 ## Tech Stack
 
