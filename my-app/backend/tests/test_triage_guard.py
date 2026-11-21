@@ -120,3 +120,16 @@ def test_observed_entities_cover_normalised_and_raw_fields():
     assert "a" * 64 in seen["file_hashes"]
     assert plan("block_url", "http://evil.example/payload").disposition == "auto"
     assert plan("block_file_hash", "A" * 64).disposition == "auto"
+
+
+def test_identity_actions_need_a_directory_sign_in_name():
+    events = EVENTS + [{"user_identity": "SYSTEM", "raw_data": {}}]
+    rec = RecommendedAction(action="revoke_sessions", target="SYSTEM", can_auto_execute=False)
+    p = plan_action(rec, observed_entities(events), 0.9, False, AUTO_TYPES, 0.95)
+    assert p.disposition == "skip" and "sign-in name" in p.reason
+
+
+def test_free_text_in_a_host_field_is_not_isolated():
+    events = EVENTS + [{"host": "Multiple Systems", "raw_data": {}}]
+    rec = RecommendedAction(action="isolate_host", target="Multiple Systems")
+    assert plan_action(rec, observed_entities(events), 0.9, False, AUTO_TYPES, 0.95).disposition == "skip"

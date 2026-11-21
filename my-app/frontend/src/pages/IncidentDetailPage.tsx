@@ -24,7 +24,8 @@ const SUBMIT_OPTIONS = [
 ] as const
 type SubmitKey = (typeof SUBMIT_OPTIONS)[number]['key']
 
-const actorLabel = (actor: string) => (actor === 'system' || actor === 'ai' ? 'Cane AI' : actor)
+const actorLabel = (actor: string) =>
+  actor === 'system' || actor === 'ai' ? 'Cane AI' : actor.startsWith('playbook:') ? 'Playbook' : actor
 const targetOf = (action: any) => action.action_params?.[ACTION_PARAM_KEYS[action.action_type]] ?? Object.values(action.action_params || {})[0] ?? ''
 
 function Field({ label, children, action }: { label: string; children: React.ReactNode; action?: React.ReactNode }) {

@@ -1,6 +1,36 @@
 # Cane AI - Incident Response Platform
 
-An AI-powered security incident response platform that ingests Microsoft security logs, triages them using AI, auto-responds to known threats via NIST 800-61 playbooks, and guides analysts through human-in-the-loop remediation for incidents requiring manual intervention.
+Cane AI is an incident response platform built around a ticket queue. Security logs come in, related events are grouped into incidents, an AI model triages each one and proposes containment, and analysts work the queue: approve or reject the proposed actions, follow a NIST 800-61 playbook, and close the incident with the evidence attached.
+
+![Dashboard: updates feed, open-incident counts and the incidents that need attention](docs/screenshots/dashboard.jpg)
+
+## Screenshots
+
+**Incident queue.** Views with live counts on the left; incidents grouped by severity, with status, attack type and assignee.
+
+![Incident queue](docs/screenshots/incidents.jpg)
+
+**Incident page.** Properties and entities on the left, the conversation and internal notes in the middle, AI analysis, threat intelligence and response actions awaiting approval on the right.
+
+![Incident page](docs/screenshots/incident-detail.jpg)
+
+**Action queue.** Every containment action the AI or a playbook proposed, waiting for a tier 2 analyst or above.
+
+![Action queue](docs/screenshots/action-queue.jpg)
+
+**Playbooks.** Seven built-in NIST 800-61 playbooks, shown step by step with the automated action each step proposes.
+
+![Playbooks](docs/screenshots/playbooks.jpg)
+
+**Logs.** Every ingested event, filterable by severity and log type, linked to the incident it belongs to.
+
+![Logs](docs/screenshots/logs.jpg)
+
+**Integrations.** 27 connectors in five groups. New ones start in dry-run.
+
+![Integrations](docs/screenshots/integrations.jpg)
+
+The screenshots use the sample scenarios in `enhanced_synthetic_logs/`. The AI analysis shown comes from the built-in rule-based stand-in (`mock` provider), which is labelled as such in the UI; with an LLM key configured, a real model writes it.
 
 ## Key Features
 
@@ -20,49 +50,37 @@ An AI-powered security incident response platform that ingests Microsoft securit
 ## Architecture
 
 ```
-                                    +------------------+
-                                    |    Frontend      |
-                                    |  React + TS      |
-                                    |  Tailwind CSS    |
-                                    +--------+---------+
-                                             |
-                                          REST (polling)
-                                             |
-+------------------+            +------------+-------------+
-|  Microsoft       |  Webhook   |                          |
-|  Sentinel        +----------->+     FastAPI Backend      |
-|  / Defender      |            |                          |
-+------------------+            +--+-----+-----+-----+----+
-                                   |     |     |     |
-                          +--------+  +--+--+  |  +--+--------+
-                          |           |     |  |  |           |
-                    +-----+----+ +---+---+ | +--+------+ +---+--------+
-                    |  Log     | | AI    | | | Action  | | Integration|
-                    |Normalizer| |Triage | | | Service | | Service    |
-                    |14 ASIM   | | BYOK  | | |Approval | | Encrypted  |
-                    | types    | |Claude | | |Workflow | | Credentials|
-                    +-----+----+ |OpenAI | | +---+-----+ +---+--------+
-                          |      |Azure  | |     |            |
-                          |      +---+---+ |     |     +------+------+
-                    +-----+----+     |     |     |     |  Microsoft  |
-                    |Correlation|    |  +--+--+  |     |  Graph API  |
-                    |  Engine   |    |  |Celery|  |     |  Sentinel   |
-                    |CorrelID + |    |  |Worker|  |     |  Defender   |
-                    |Time Window|    |  +--+---+  |     |  VirusTotal |
-                    +-----+----+    |     |       |     |  AbuseIPDB  |
-                          |         |     |       |     +-------------+
-                    +-----+---------+-----+-------+----+
-                    |          PostgreSQL               |
-                    |  incidents | log_events | users   |
-                    |  playbooks | ai_analyses| actions |
-                    |  timeline  | integrations| audit  |
-                    +------------------+----------------+
-                                       |
-                                 +-----+-----+
-                                 |   Redis    |
-                                 | Broker +   |
-                                 | Cache      |
-                                 +-----------+
+  Log senders                       Analysts
+  Sentinel webhook, file upload,    Browser: React + TypeScript + Tailwind
+  batch API, polled sources         (REST, plus a server-sent event stream
+  (Splunk, Elastic, GuardDuty)       for live updates)
+          |                                   |
+          v                                   v
+  +---------------------------------------------------------------+
+  |                        FastAPI backend                        |
+  |                                                               |
+  |  Ingestion        normalise 14 log types, correlate by        |
+  |                   CorrelationId, open incidents               |
+  |  Triage           enrich -> LLM -> validate -> guard          |
+  |  Actions          approval queue, fan-out to connected tools  |
+  |  Playbooks        NIST 800-61 steps, automated proposals      |
+  |  Integrations     27 connectors, encrypted credentials        |
+  +-------+----------------------+------------------------+-------+
+          |                      |                        |
+          v                      v                        v
+  +---------------+   +---------------------+   +------------------+
+  |  PostgreSQL   |   |  Redis              |   |  Celery workers  |
+  |  incidents,   |   |  task broker and    |   |  auto-triage,    |
+  |  log events,  |   |  live-update        |   |  notifications,  |
+  |  actions,     |   |  pub/sub            |   |  ticket sync,    |
+  |  playbooks,   |   +---------------------+   |  source polling, |
+  |  timeline     |                             |  health checks   |
+  +---------------+                             +--------+---------+
+                                                         |
+                                                         v
+                         Outside systems, through connectors:
+                         EDR and firewalls, identity, threat intelligence,
+                         chat and paging, ticketing, LLM provider
 ```
 
 ### Automated TDIR Pipeline
@@ -182,82 +200,62 @@ The platform implements an automated Threat Detection, Investigation, and Respon
 | Component | Technology |
 |-----------|-----------|
 | Backend | Python 3.11+, FastAPI, SQLAlchemy (async), Celery |
-| Frontend | React 18, TypeScript, Tailwind CSS, Zustand, React Query |
-| Database | PostgreSQL 16 |
-| Cache/Broker | Redis 7 |
+| Frontend | React 18, TypeScript, Tailwind CSS, Zustand, React Query, Vite |
+| Database | PostgreSQL 16, Alembic migrations |
+| Broker / live updates | Redis 7 |
 | AI Providers | Anthropic Claude, OpenAI, Azure OpenAI (BYOK) |
-| Integrations | Microsoft Graph, Sentinel, Defender, VirusTotal, AbuseIPDB |
+| Integrations | 27 connectors: see [Platform Integrations](#platform-integrations) |
 | Deployment | Docker Compose (dev), Azure Container Apps (prod) |
 
 ## Project Structure
 
 ```
+docs/
+├── INTEGRATIONS.md             # Per connector: what is verified, what it needs
+└── screenshots/
 my-app/
-├── docker-compose.yml          # PostgreSQL, Redis, Backend, Celery, Frontend
+├── docker-compose.yml          # PostgreSQL, Redis, backend, Celery worker + beat, frontend
 ├── backend/
 │   ├── app/
-│   │   ├── main.py             # FastAPI application
-│   │   ├── config.py           # Pydantic Settings (env-based)
-│   │   ├── database.py         # Async SQLAlchemy engine
-│   │   ├── models/             # 11 SQLAlchemy ORM models
-│   │   ├── schemas/            # Pydantic request/response schemas
-│   │   ├── api/                # FastAPI route modules
-│   │   │   ├── auth.py         # Register, login, refresh
-│   │   │   ├── users.py        # Profile, API key management
-│   │   │   ├── incidents.py    # CRUD, assign, escalate, close, timeline
-│   │   │   ├── logs.py         # Ingest, batch, upload, query
-│   │   │   ├── playbooks.py    # CRUD, step management, execute
-│   │   │   ├── triage.py       # AI analyze, correlate, recommendations
-│   │   │   ├── actions.py      # Execute, approve, reject, history
-│   │   │   ├── dashboard.py    # Overview, threats, geo, timeline
-│   │   │   └── integrations.py # CRUD, test connection, health
-│   │   ├── services/           # Business logic layer
-│   │   │   ├── log_normalizer.py   # 14 ASIM log type normalizers
-│   │   │   ├── correlation.py      # Event correlation engine
-│   │   │   ├── log_ingestion.py    # Ingestion orchestration
-│   │   │   ├── enrichment_service.py  # IOC extraction + threat intel queries
-│   │   │   ├── triage_service.py   # AI triage orchestration
-│   │   │   ├── triage_guard.py     # Validates LLM output, decides what may run
-│   │   │   ├── playbook_service.py # Playbook execution engine
-│   │   │   ├── action_service.py   # Auto-response + approval workflow
-│   │   │   ├── integration_service.py # Credential encryption + health
-│   │   │   ├── auth_service.py     # JWT + password hashing
-│   │   │   └── encryption_service.py  # AES-256-GCM encryption
-│   │   ├── ai/                 # LLM integration (BYOK)
-│   │   │   ├── provider_base.py    # LLMProvider protocol
-│   │   │   ├── claude_provider.py  # Anthropic Claude
-│   │   │   ├── openai_provider.py  # OpenAI
-│   │   │   ├── azure_openai_provider.py # Azure OpenAI
-│   │   │   ├── provider_factory.py # Factory (resolves user or system API key)
-│   │   │   └── prompts/           # Structured prompt templates
-│   │   ├── integrations/       # Platform connectors
-│   │   │   ├── base_client.py      # ABC + OAuth2 mixin
-│   │   │   ├── microsoft_graph.py  # Disable user, revoke sessions, etc.
-│   │   │   ├── microsoft_sentinel.py # KQL queries, incidents, watchlists
-│   │   │   ├── microsoft_defender.py # Isolate, block, AV scan
-│   │   │   ├── threat_intel.py     # VirusTotal + AbuseIPDB
-│   │   │   └── registry.py        # Integration registry
-│   │   ├── data/
-│   │   │   └── seed_playbooks.py   # 7 NIST 800-61 playbooks (59 steps)
-│   │   └── workers/
-│   │       ├── celery_app.py       # Celery config + beat schedule
-│   │       ├── dispatch.py         # Queue work after the DB commit
-│   │       ├── health_checks.py    # Scheduled integration health checks
-│   │       └── triage_tasks.py     # Auto-triage background tasks
-│   ├── tests/                  # Unit tests (pytest)
-│   ├── scripts/                # e2e_test.py, ingest_synthetic_logs.py
-│   └── alembic/                # Migration environment (no revisions yet)
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx             # Routes + auth guard
-│   │   ├── api/                # Axios API client layer
-│   │   ├── store/              # Zustand state management
-│   │   ├── pages/              # Dashboard, Incidents, Action Queue, Playbooks, Logs, Settings
-│   │   ├── components/         # App shell (icon rail + top bar), queue table, shared UI
-│   │   ├── types/              # TypeScript interfaces
-│   │   └── utils/              # Constants, formatters
-│   └── package.json
-└── synthetic_logs/             # 14 ASIM log files + 4 attack scenario files
+│   │   ├── main.py             # FastAPI application, startup checks
+│   │   ├── config.py           # Settings (CANE_* environment variables)
+│   │   ├── models/  schemas/   # SQLAlchemy models, Pydantic request/response shapes
+│   │   ├── api/                # Routes
+│   │   │   ├── auth.py  users.py       # Sign-in, accounts, team, API keys
+│   │   │   ├── incidents.py            # Queue views, search, CRUD, assign, close, enrich
+│   │   │   ├── logs.py                 # Ingest, batch, upload, query
+│   │   │   ├── triage.py  actions.py   # AI analysis; approve / reject / execute
+│   │   │   ├── playbooks.py            # CRUD, attach to incident, advance step
+│   │   │   ├── dashboard.py  integrations.py
+│   │   │   ├── events.py               # Live update stream (server-sent events)
+│   │   │   └── hooks.py                # Slack approval buttons (signature-verified)
+│   │   ├── services/
+│   │   │   ├── log_normalizer.py       # 14 log types -> one event shape
+│   │   │   ├── correlation.py          # Group events, decide when to open an incident
+│   │   │   ├── log_ingestion.py        # Ingestion orchestration
+│   │   │   ├── enrichment_service.py   # Threat intel and user / host context lookups
+│   │   │   ├── triage_service.py       # Enrich -> LLM -> validate -> actions
+│   │   │   ├── triage_guard.py         # What an LLM reply is allowed to cause
+│   │   │   ├── action_service.py       # Approval workflow, fan-out to connected tools
+│   │   │   ├── playbook_service.py     # Step progression, automated-step proposals
+│   │   │   ├── events.py               # Change feed driven by the incident timeline
+│   │   │   ├── followup_service.py     # Notifications and ticket sync
+│   │   │   └── integration_service.py  # Connector lookup by ability, health
+│   │   ├── ai/                         # Claude, OpenAI, Azure OpenAI, mock; prompts
+│   │   ├── integrations/               # 27 connectors + base_client.py + registry.py
+│   │   ├── data/seed_playbooks.py      # 7 NIST 800-61 playbooks (59 steps)
+│   │   └── workers/                    # Celery: triage, follow-ups, source polling, health
+│   ├── alembic/versions/       # Database migrations
+│   ├── scripts/                # migrate.py, e2e_test.py, ingest_synthetic_logs.py
+│   └── tests/                  # Unit tests and connector contract tests
+└── frontend/src/
+    ├── App.tsx                 # Routes + auth guard
+    ├── useLiveUpdates.ts       # Subscribes to the event stream
+    ├── api/  store/            # Axios client, Zustand auth state
+    ├── components/             # App shell (icon rail + top bar), queue table, shared UI
+    └── pages/                  # Dashboard, Incidents, Incident detail, Action queue,
+                                # Playbooks, Logs, Settings, Login
+synthetic_logs/  enhanced_synthetic_logs/   # Sample data: 14 log types, 4 attack scenarios
 ```
 
 ## Pre-Built Playbooks

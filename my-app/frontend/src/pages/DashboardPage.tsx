@@ -28,7 +28,8 @@ const VERBS: Record<string, string> = {
   playbook_completed: 'completed the playbook on',
 }
 
-const actorName = (actor: string) => (actor === 'system' ? 'Cane AI' : actor === 'ai' ? 'Cane AI' : actor.split('@')[0])
+const actorName = (actor: string) =>
+  actor === 'system' || actor === 'ai' ? 'Cane AI' : actor.startsWith('playbook:') ? 'Playbook' : actor.split('@')[0]
 
 function Stat({ value, label, onClick }: { value: number | string; label: string; onClick?: () => void }) {
   return (

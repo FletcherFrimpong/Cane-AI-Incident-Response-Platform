@@ -280,6 +280,13 @@ def plan_action(
         target = ip
     elif target.lower() not in observed[kind]:
         return ActionPlan(action, target, None, "skip", "target does not appear in the incident's events")
+    if kind == "hosts" and (" " in target or len(target) > 253):
+        # Free text that ended up in a host field ("Multiple Systems") is not a machine.
+        return ActionPlan(action, target, None, "skip", "not a hostname")
+    if kind == "users" and "@" not in target:
+        # Logs are full of local and built-in accounts (SYSTEM, admin, svc_backup).
+        # Identity actions go to a directory, which only knows sign-in names.
+        return ActionPlan(action, target, None, "skip", "not a directory sign-in name (no @domain)")
 
     params = {ACTION_PARAM_KEYS[action]: target}
     if action == "purge_email":
